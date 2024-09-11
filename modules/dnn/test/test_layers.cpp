@@ -62,37 +62,6 @@ static String _tf(TString filename)
     return (basetestdir + "dnn/layers/") + filename;
 }
 
-void runLayer(Ptr<Layer> layer, std::vector<Mat> &inpBlobs, std::vector<Mat> &outBlobs)
-{
-    size_t ninputs = inpBlobs.size();
-    std::vector<Mat> inp(ninputs), outp, intp;
-    std::vector<MatShape> inputs, outputs, internals;
-
-    for (size_t i = 0; i < ninputs; i++)
-    {
-        inp[i] = inpBlobs[i].clone();
-        inputs.push_back(shape(inp[i]));
-    }
-
-    layer->getMemoryShapes(inputs, 0, outputs, internals);
-    for (size_t i = 0; i < outputs.size(); i++)
-    {
-        outp.push_back(Mat(outputs[i], CV_32F));
-    }
-    for (size_t i = 0; i < internals.size(); i++)
-    {
-        intp.push_back(Mat(internals[i], CV_32F));
-    }
-
-    layer->finalize(inp, outp);
-    layer->forward(inp, outp, intp);
-
-    size_t noutputs = outp.size();
-    outBlobs.resize(noutputs);
-    for (size_t i = 0; i < noutputs; i++)
-        outBlobs[i] = outp[i];
-}
-
 class Test_Caffe_layers : public DNNTestLayer
 {
 public:
@@ -398,6 +367,9 @@ TEST_P(Test_Caffe_layers, PReLU)
 // TODO: fix an unstable test case
 TEST_P(Test_Caffe_layers, layer_prelu_fc)
 {
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH); // TODO: fix this test for OpenVINO
+
     if (backend == DNN_BACKEND_OPENCV && target == DNN_TARGET_OPENCL_FP16)
         applyTestTag(CV_TEST_TAG_DNN_SKIP_OPENCL_FP16);
     // Reference output values are in range [-0.0001, 10.3906]
@@ -1328,39 +1300,6 @@ TEST_P(Layer_Test_Convolution_DLDT, Accuracy)
         ASSERT_EQ(net.getLayer(outLayers[0])->type, "Result");
 }
 
-TEST_P(Layer_Test_Convolution_DLDT, setInput_uint8)
-{
-    const Backend backendId = get<0>(GetParam());
-    const Target targetId = get<1>(GetParam());
-
-    if (backendId == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019 && targetId == DNN_TARGET_MYRIAD)
-        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_MYRIAD, CV_TEST_TAG_DNN_SKIP_IE_NN_BUILDER);
-
-    if (backendId != DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019 && backendId != DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
-        throw SkipTestException("No support for async forward");
-
-    ASSERT_EQ(DNN_BACKEND_INFERENCE_ENGINE_NGRAPH, backendId);
-
-    int blobSize[] = {2, 6, 75, 113};
-    Mat inputs[] = {Mat(4, &blobSize[0], CV_8U), Mat()};
-
-    randu(inputs[0], 0, 255);
-    inputs[0].convertTo(inputs[1], CV_32F);
-
-    Mat outs[2];
-    for (int i = 0; i < 2; ++i)
-    {
-        Net net = readNet(_tf("layer_convolution.xml"), _tf("layer_convolution.bin"));
-        net.setPreferableBackend(backendId);
-        net.setPreferableTarget(targetId);
-        net.setInput(inputs[i]);
-        outs[i] = net.forward();
-        ASSERT_EQ(outs[i].type(), CV_32F);
-    }
-    if (targetId != DNN_TARGET_MYRIAD)
-        normAssert(outs[0], outs[1]);
-}
-
 TEST_P(Layer_Test_Convolution_DLDT, multithreading)
 {
     const Backend backendId = get<0>(GetParam());
@@ -1724,7 +1663,7 @@ TEST(Layer_Test_PoolingIndices, Accuracy)
     Mat inp(10, 10, CV_8U);
     randu(inp, 0, 255);
 
-    Mat maxValues(5, 5, CV_32F, Scalar(-1)), indices(5, 5, CV_32F, Scalar(-1));
+    Mat maxValues(5, 5, CV_32F, Scalar(-1)), indices(5, 5, CV_64S, Scalar(-1));
     for (int y = 0; y < 10; ++y)
     {
         int dstY = y / 2;
@@ -1735,7 +1674,7 @@ TEST(Layer_Test_PoolingIndices, Accuracy)
             if ((float)inp.at<uint8_t>(y, x) > maxValues.at<float>(dstY, dstX))
             {
                 maxValues.at<float>(dstY, dstX) = val;
-                indices.at<float>(dstY, dstX) = y * 10 + x;
+                indices.at<int64_t>(dstY, dstX) = y * 10 + x;
             }
         }
     }
@@ -1837,9 +1776,7 @@ TEST(Layer_Test_ReduceMean, accuracy_input_0)
         }
 
         EXPECT_EQ(gt_shape, shape(output));
-
-        Mat a = output.reshape(1, output.total());
-        normAssert(a, Mat(resReduceMean[i]));
+        normAssert(output, Mat(gt_shape, CV_32F, resReduceMean[i].data()));
     }
 }
 
@@ -2492,7 +2429,12 @@ public:
 
     static testing::internal::ParamGenerator<tuple<Backend, Target> > dnnBackendsAndTargetsForFusionTests()
     {
-        return dnnBackendsAndTargets(false, false, true, false, true, false); // OCV OpenCL + OCV CPU + CUDA
+        return dnnBackendsAndTargets(/* withInferenceEngine = */ false,
+                                     /* obsolete_withHalide = */ false,
+                                     /* withCpuOCV = */ true,
+                                     /* withVkCom = */ false,
+                                     /* withCUDA = */ true,
+                                     /* withNgraph = */false); // OCV OpenCL + OCV CPU + CUDA
     }
 };
 

@@ -136,12 +136,12 @@ public slots:
     void addSlider2(QString trackbar_name, QString window_name, void* value, int count, void* on_change, void *userdata);
     void moveWindow(QString name, int x, int y);
     void resizeWindow(QString name, int width, int height);
-    void showImage(QString name, void* arr);
+    void showImage(QString name, cv::_InputArray arr);
     void displayInfo( QString name, QString text, int delayms );
     void displayStatusBar( QString name, QString text, int delayms );
     void timeOut();
     void toggleFullScreen(QString name, double flags );
-    CvRect getWindowRect(QString name);
+    cv::Rect getWindowRect(QString name);
     double isFullScreen(QString name);
     double getPropWindow(QString name);
     void setPropWindow(QString name, double flags );
@@ -151,7 +151,7 @@ public slots:
     void setRatioWindow(QString name, double arg2 );
     void saveWindowParameters(QString name);
     void loadWindowParameters(QString name);
-    void putText(void* arg1, QString text, QPoint org, void* font);
+    void putText(cv::Mat& img, QString text, QPoint org, void* font);
     void addButton(QString button_name, int button_type, int initial_button_state , void* on_change, void* userdata);
     void enablePropertiesButtonEachWindow();
 
@@ -182,7 +182,7 @@ class CvButtonbar : public CvBar
 public:
     CvButtonbar(QWidget* arg, QString bar_name);
 
-    void addButton(QString button_name, CvButtonCallback call, void* userdata,  int button_type, int initial_button_state);
+    void addButton(QString button_name, cv::ButtonCallback call, void* userdata,  int button_type, int initial_button_state);
 
 private:
     void setLabel();
@@ -196,12 +196,12 @@ class CvPushButton : public QPushButton
 {
     Q_OBJECT
 public:
-    CvPushButton(CvButtonbar* par, QString button_name, CvButtonCallback call, void* userdata);
+    CvPushButton(CvButtonbar* par, QString button_name, cv::ButtonCallback call, void* userdata);
 
 private:
     CvButtonbar* myparent;
     QString button_name ;
-    CvButtonCallback callback;
+    cv::ButtonCallback callback;
     void* userdata;
 
 private slots:
@@ -213,12 +213,12 @@ class CvCheckBox : public QCheckBox
 {
     Q_OBJECT
 public:
-    CvCheckBox(CvButtonbar* par, QString button_name, CvButtonCallback call, void* userdata, int initial_button_state);
+    CvCheckBox(CvButtonbar* par, QString button_name, cv::ButtonCallback call, void* userdata, int initial_button_state);
 
 private:
     CvButtonbar* myparent;
     QString button_name ;
-    CvButtonCallback callback;
+    cv::ButtonCallback callback;
     void* userdata;
 
 private slots:
@@ -230,12 +230,12 @@ class CvRadioButton : public QRadioButton
 {
     Q_OBJECT
 public:
-    CvRadioButton(CvButtonbar* par, QString button_name, CvButtonCallback call, void* userdata, int initial_button_state);
+    CvRadioButton(CvButtonbar* par, QString button_name, cv::ButtonCallback call, void* userdata, int initial_button_state);
 
 private:
     CvButtonbar* myparent;
     QString button_name ;
-    CvButtonCallback callback;
+    cv::ButtonCallback callback;
     void* userdata;
 
 private slots:
@@ -297,7 +297,7 @@ class CvWindow : public CvWinModel
 {
     Q_OBJECT
 public:
-    CvWindow(QString arg2, int flag = CV_WINDOW_NORMAL);
+    CvWindow(QString arg2, int flag = cv::WINDOW_NORMAL);
     ~CvWindow();
 
     void setMouseCallBack(CvMouseCallback m, void* param);
@@ -308,13 +308,13 @@ public:
     double getRatio();
     void setRatio(int flags);
 
-    CvRect getWindowRect();
+    cv::Rect getWindowRect();
     int getPropWindow();
     void setPropWindow(int flags);
 
     void toggleFullScreen(int flags);
 
-    void updateImage(void* arr);
+    void updateImage(cv::InputArray);
 
     void displayInfo(QString text, int delayms);
     void displayStatusBar(QString text, int delayms);
@@ -323,8 +323,8 @@ public:
 
     static CvButtonbar* createButtonBar(QString bar_name);
 
-    static void addSlider(CvWindow* w, QString name, int* value, int count, CvTrackbarCallback on_change CV_DEFAULT(NULL));
-    static void addSlider2(CvWindow* w, QString name, int* value, int count, CvTrackbarCallback2 on_change CV_DEFAULT(NULL), void* userdata CV_DEFAULT(0));
+    static void addSlider(CvWindow* w, QString name, int* value, int count, CvTrackbarCallback on_change);
+    static void addSlider2(CvWindow* w, QString name, int* value, int count, CvTrackbarCallback2 on_change, void* userdata);
 
     void setOpenGlDrawCallback(CvOpenGlDrawCallback callback, void* userdata);
     void makeCurrentOpenGlContext();
@@ -384,10 +384,10 @@ private slots:
 
 enum type_mouse_event { mouse_up = 0, mouse_down = 1, mouse_dbclick = 2, mouse_move = 3, mouse_wheel = 4 };
 static const int tableMouseButtons[][3]={
-    {CV_EVENT_LBUTTONUP, CV_EVENT_RBUTTONUP, CV_EVENT_MBUTTONUP},               //mouse_up
-    {CV_EVENT_LBUTTONDOWN, CV_EVENT_RBUTTONDOWN, CV_EVENT_MBUTTONDOWN},         //mouse_down
-    {CV_EVENT_LBUTTONDBLCLK, CV_EVENT_RBUTTONDBLCLK, CV_EVENT_MBUTTONDBLCLK},   //mouse_dbclick
-    {CV_EVENT_MOUSEMOVE, CV_EVENT_MOUSEMOVE, CV_EVENT_MOUSEMOVE},               //mouse_move
+    {cv::EVENT_LBUTTONUP, cv::EVENT_RBUTTONUP, cv::EVENT_MBUTTONUP},               //mouse_up
+    {cv::EVENT_LBUTTONDOWN, cv::EVENT_RBUTTONDOWN, cv::EVENT_MBUTTONDOWN},         //mouse_down
+    {cv::EVENT_LBUTTONDBLCLK, cv::EVENT_RBUTTONDBLCLK, cv::EVENT_MBUTTONDBLCLK},   //mouse_dbclick
+    {cv::EVENT_MOUSEMOVE, cv::EVENT_MOUSEMOVE, cv::EVENT_MOUSEMOVE},               //mouse_move
     {0, 0, 0}                                                                   //mouse_wheel, to prevent exceptions in code
 };
 
@@ -407,7 +407,7 @@ public:
     virtual double getRatio() = 0;
     virtual void setRatio(int flags) = 0;
 
-    virtual void updateImage(const CvArr* arr) = 0;
+    virtual void updateImage(cv::InputArray) = 0;
 
     virtual void startDisplayInfo(QString text, int delayms) = 0;
 
@@ -508,7 +508,7 @@ public:
     double getRatio() CV_OVERRIDE;
     void setRatio(int flags) CV_OVERRIDE;
 
-    void updateImage(const CvArr* arr) CV_OVERRIDE;
+    void updateImage(cv::InputArray) CV_OVERRIDE;
 
     void startDisplayInfo(QString text, int delayms) CV_OVERRIDE;
 
@@ -553,7 +553,7 @@ private:
     //parameters (will be save/load)
     QTransform param_matrixWorld;
 
-    CvMat* image2Draw_mat;
+    cv::Mat image2Draw_mat;
     QImage image2Draw_qt;
     int nbChannelOriginImage;
 
@@ -566,8 +566,6 @@ private:
     QRect   positionCorners;
     QTransform matrixWorld_inv;
     float ratioX, ratioY;
-
-    bool isSameSize(IplImage* img1,IplImage* img2);
 
     QSize sizeHint() const CV_OVERRIDE;
     QPointer<CvWindow> centralWidget;

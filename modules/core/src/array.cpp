@@ -189,7 +189,7 @@ CV_IMPL void
 cvReleaseMat( CvMat** array )
 {
     if( !array )
-        CV_Error( CV_HeaderIsNull, "" );
+        CV_Error( cv::Error::HeaderIsNull, "" );
 
     if( *array )
     {
@@ -234,7 +234,7 @@ cvInitMatNDHeader( CvMatND* mat, int dims, const int* sizes,
                    int type, void* data )
 {
     type = CV_MAT_TYPE(type);
-    int64 step = CV_ELEM_SIZE(type);
+    int64 esz = CV_ELEM_SIZE(type), step = esz;
 
     if( !mat )
         CV_Error( cv::Error::StsNullPtr, "NULL matrix header pointer" );
@@ -262,6 +262,13 @@ cvInitMatNDHeader( CvMatND* mat, int dims, const int* sizes,
 
     mat->type = CV_MATND_MAGIC_VAL | (step <= INT_MAX ? CV_MAT_CONT_FLAG : 0) | type;
     mat->dims = dims;
+    if (dims < 2) {
+        mat->dims = 2;
+        mat->dim[1].size = dims == 0 ? 1 : mat->dim[0].size;
+        mat->dim[1].step = (int)esz;
+        mat->dim[0].size = 1;
+        mat->dim[0].step = (int)(mat->dim[1].size*esz);
+    }
     mat->data.ptr = (uchar*)data;
     mat->refcount = 0;
     mat->hdr_refcount = 0;
@@ -326,200 +333,6 @@ cvCloneMatND( const CvMatND* src )
 }
 
 
-static CvMatND*
-cvGetMatND( const CvArr* arr, CvMatND* matnd, int* coi )
-{
-    CvMatND* result = 0;
-
-    if( coi )
-        *coi = 0;
-
-    if( !matnd || !arr )
-        CV_Error( cv::Error::StsNullPtr, "NULL array pointer is passed" );
-
-    if( CV_IS_MATND_HDR(arr))
-    {
-        if( !((CvMatND*)arr)->data.ptr )
-            CV_Error( cv::Error::StsNullPtr, "The matrix has NULL data pointer" );
-
-        result = (CvMatND*)arr;
-    }
-    else
-    {
-        CvMat stub, *mat = (CvMat*)arr;
-
-        if( CV_IS_IMAGE_HDR( mat ))
-            mat = cvGetMat( mat, &stub, coi );
-
-        if( !CV_IS_MAT_HDR( mat ))
-            CV_Error( cv::Error::StsBadArg, "Unrecognized or unsupported array type" );
-
-        if( !mat->data.ptr )
-            CV_Error( cv::Error::StsNullPtr, "Input array has NULL data pointer" );
-
-        matnd->data.ptr = mat->data.ptr;
-        matnd->refcount = 0;
-        matnd->hdr_refcount = 0;
-        matnd->type = mat->type;
-        matnd->dims = 2;
-        matnd->dim[0].size = mat->rows;
-        matnd->dim[0].step = mat->step;
-        matnd->dim[1].size = mat->cols;
-        matnd->dim[1].step = CV_ELEM_SIZE(mat->type);
-        result = matnd;
-    }
-
-    return result;
-}
-
-
-// returns number of dimensions to iterate.
-/*
-Checks whether <count> arrays have equal type, sizes (mask is optional array
-that needs to have the same size, but 8uC1 or 8sC1 type - feature has been disabled).
-Returns number of dimensions to iterate through:
-0 means that all arrays are continuous,
-1 means that all arrays are vectors of continuous arrays etc.
-and the size of largest common continuous part of the arrays
-*/
-CV_IMPL int
-cvInitNArrayIterator( int count, CvArr** arrs,
-                      const CvArr* mask, CvMatND* stubs,
-                      CvNArrayIterator* iterator, int flags )
-{
-    int dims = -1;
-    int i, j, size, dim0 = -1;
-    int64 step;
-    CvMatND* hdr0 = 0;
-
-    if( count < 1 || count > CV_MAX_ARR )
-        CV_Error( cv::Error::StsOutOfRange, "Incorrect number of arrays" );
-
-    if( !arrs || !stubs )
-        CV_Error( cv::Error::StsNullPtr, "Some of required array pointers is NULL" );
-
-    if( !iterator )
-        CV_Error( cv::Error::StsNullPtr, "Iterator pointer is NULL" );
-
-    if (mask)
-        CV_Error( cv::Error::StsBadArg, "Iterator with mask is not supported" );
-
-    for( i = 0; i < count; i++ )
-    {
-        const CvArr* arr = arrs[i];
-        CvMatND* hdr;
-
-        if( !arr )
-            CV_Error( cv::Error::StsNullPtr, "Some of required array pointers is NULL" );
-
-        if( CV_IS_MATND( arr ))
-            hdr = (CvMatND*)arr;
-        else
-        {
-            int coi = 0;
-            hdr = cvGetMatND( arr, stubs + i, &coi );
-            if( coi != 0 )
-                CV_Error( cv::Error::BadCOI, "COI set is not allowed here" );
-        }
-
-        iterator->hdr[i] = hdr;
-
-        if( i > 0 )
-        {
-            if( hdr->dims != hdr0->dims )
-                CV_Error( cv::Error::StsUnmatchedSizes,
-                          "Number of dimensions is the same for all arrays" );
-
-            switch( flags & (CV_NO_DEPTH_CHECK|CV_NO_CN_CHECK))
-            {
-            case 0:
-                if( !CV_ARE_TYPES_EQ( hdr, hdr0 ))
-                    CV_Error( cv::Error::StsUnmatchedFormats,
-                              "Data type is not the same for all arrays" );
-                break;
-            case CV_NO_DEPTH_CHECK:
-                if( !CV_ARE_CNS_EQ( hdr, hdr0 ))
-                    CV_Error( cv::Error::StsUnmatchedFormats,
-                              "Number of channels is not the same for all arrays" );
-                break;
-            case CV_NO_CN_CHECK:
-                if( !CV_ARE_CNS_EQ( hdr, hdr0 ))
-                    CV_Error( cv::Error::StsUnmatchedFormats,
-                              "Depth is not the same for all arrays" );
-                break;
-            }
-
-            if( !(flags & CV_NO_SIZE_CHECK) )
-            {
-                for( j = 0; j < hdr->dims; j++ )
-                    if( hdr->dim[j].size != hdr0->dim[j].size )
-                        CV_Error( cv::Error::StsUnmatchedSizes,
-                                  "Dimension sizes are the same for all arrays" );
-            }
-        }
-        else
-            hdr0 = hdr;
-
-        step = CV_ELEM_SIZE(hdr->type);
-        for( j = hdr->dims - 1; j > dim0; j-- )
-        {
-            if( step != hdr->dim[j].step )
-                break;
-            step *= hdr->dim[j].size;
-        }
-
-        if( j == dim0 && step > INT_MAX )
-            j++;
-
-        if( j > dim0 )
-            dim0 = j;
-
-        iterator->hdr[i] = (CvMatND*)hdr;
-        iterator->ptr[i] = (uchar*)hdr->data.ptr;
-    }
-
-    size = 1;
-    for( j = hdr0->dims - 1; j > dim0; j-- )
-        size *= hdr0->dim[j].size;
-
-    dims = dim0 + 1;
-    iterator->dims = dims;
-    iterator->count = count;
-    iterator->size = cvSize(size,1);
-
-    for( i = 0; i < dims; i++ )
-        iterator->stack[i] = hdr0->dim[i].size;
-
-    return dims;
-}
-
-
-// returns zero value if iteration is finished, non-zero otherwise
-CV_IMPL int cvNextNArraySlice( CvNArrayIterator* iterator )
-{
-    CV_Assert( iterator != 0 );
-    int i, dims;
-
-    for( dims = iterator->dims; dims > 0; dims-- )
-    {
-        for( i = 0; i < iterator->count; i++ )
-            iterator->ptr[i] += iterator->hdr[i]->dim[dims-1].step;
-
-        if( --iterator->stack[dims-1] > 0 )
-            break;
-
-        const int size = iterator->hdr[0]->dim[dims-1].size;
-
-        for( i = 0; i < iterator->count; i++ )
-            iterator->ptr[i] -= (size_t)size*iterator->hdr[i]->dim[dims-1].step;
-
-        iterator->stack[dims-1] = size;
-    }
-
-    return dims > 0;
-}
-
-
 /****************************************************************************************\
 *                            CvSparseMat creation and basic operations                   *
 \****************************************************************************************/
@@ -580,7 +393,7 @@ CV_IMPL void
 cvReleaseSparseMat( CvSparseMat** array )
 {
     if( !array )
-        CV_Error( CV_HeaderIsNull, "" );
+        CV_Error( cv::Error::HeaderIsNull, "" );
 
     if( *array )
     {
@@ -1003,6 +816,10 @@ cvReleaseData( CvArr* arr )
         CV_Error( cv::Error::StsBadArg, "unrecognized or unsupported array type" );
 }
 
+static inline cv::Size cvGetMatSize( const CvMat* mat )
+{
+    return cv::Size(mat->cols, mat->rows);
+}
 
 // Retrieves essential information about image ROI or CvMat data
 CV_IMPL void
@@ -1388,67 +1205,6 @@ cvGetCols( const CvArr* arr, CvMat* submat, int start_col, int end_col )
     return res;
 }
 
-
-// Selects array diagonal
-CV_IMPL  CvMat*
-cvGetDiag( const CvArr* arr, CvMat* submat, int diag )
-{
-    CvMat* res = 0;
-    CvMat stub, *mat = (CvMat*)arr;
-    int len, pix_size;
-
-    if( !CV_IS_MAT( mat ))
-        mat = cvGetMat( mat, &stub );
-
-    if( !submat )
-        CV_Error( cv::Error::StsNullPtr, "" );
-
-    pix_size = CV_ELEM_SIZE(mat->type);
-
-    /*{
-    int* refcount = mat->refcount;
-
-    if( refcount )
-        ++*refcount;
-
-    cvDecRefData( submat );
-    }*/
-
-    if( diag >= 0 )
-    {
-        len = mat->cols - diag;
-
-        if( len <= 0 )
-            CV_Error( cv::Error::StsOutOfRange, "" );
-
-        len = CV_IMIN( len, mat->rows );
-        submat->data.ptr = mat->data.ptr + diag*pix_size;
-    }
-    else
-    {
-        len = mat->rows + diag;
-
-        if( len <= 0 )
-            CV_Error( cv::Error::StsOutOfRange, "" );
-
-        len = CV_IMIN( len, mat->cols );
-        submat->data.ptr = mat->data.ptr - diag*mat->step;
-    }
-
-    submat->rows = len;
-    submat->cols = 1;
-    submat->step = mat->step + (submat->rows > 1 ? pix_size : 0);
-    submat->type = mat->type;
-    if( submat->rows > 1 )
-        submat->type &= ~CV_MAT_CONT_FLAG;
-    else
-        submat->type |= CV_MAT_CONT_FLAG;
-    submat->refcount = 0;
-    submat->hdr_refcount = 0;
-    res = submat;
-
-    return res;
-}
 
 /****************************************************************************************\
 *                      Operations on CvScalar and accessing array elements               *
@@ -2500,214 +2256,6 @@ cvGetMat( const CvArr* array, CvMat* mat,
 }
 
 
-CV_IMPL CvArr*
-cvReshapeMatND( const CvArr* arr,
-                int sizeof_header, CvArr* _header,
-                int new_cn, int new_dims, int* new_sizes )
-{
-    CvArr* result = 0;
-    int dims, coi = 0;
-
-    if( !arr || !_header )
-        CV_Error( cv::Error::StsNullPtr, "NULL pointer to array or destination header" );
-
-    if( new_cn == 0 && new_dims == 0 )
-        CV_Error( cv::Error::StsBadArg, "None of array parameters is changed: dummy call?" );
-
-    dims = cvGetDims( arr );
-
-    if( new_dims == 0 )
-    {
-        new_sizes = 0;
-        new_dims = dims;
-    }
-    else if( new_dims == 1 )
-    {
-        new_sizes = 0;
-    }
-    else
-    {
-        if( new_dims <= 0 || new_dims > CV_MAX_DIM )
-            CV_Error( cv::Error::StsOutOfRange, "Non-positive or too large number of dimensions" );
-        if( !new_sizes )
-            CV_Error( cv::Error::StsNullPtr, "New dimension sizes are not specified" );
-    }
-
-    if( new_dims <= 2 )
-    {
-        CvMat* mat = (CvMat*)arr;
-        CvMat header;
-        int* refcount = 0;
-        int  hdr_refcount = 0;
-        int  total_width, new_rows, cn;
-
-        if( sizeof_header != sizeof(CvMat) && sizeof_header != sizeof(CvMatND) )
-            CV_Error( cv::Error::StsBadArg, "The output header should be CvMat or CvMatND" );
-
-        if( mat == (CvMat*)_header )
-        {
-            refcount = mat->refcount;
-            hdr_refcount = mat->hdr_refcount;
-        }
-
-        if( !CV_IS_MAT( mat ))
-            mat = cvGetMat( mat, &header, &coi, 1 );
-
-        cn = CV_MAT_CN( mat->type );
-        total_width = mat->cols * cn;
-
-        if( new_cn == 0 )
-            new_cn = cn;
-
-        if( new_sizes )
-            new_rows = new_sizes[0];
-        else if( new_dims == 1 )
-            new_rows = total_width*mat->rows/new_cn;
-        else
-        {
-            new_rows = mat->rows;
-            if( new_cn > total_width )
-                new_rows = mat->rows * total_width / new_cn;
-        }
-
-        if( new_rows != mat->rows )
-        {
-            int total_size = total_width * mat->rows;
-
-            if( !CV_IS_MAT_CONT( mat->type ))
-                CV_Error( cv::Error::BadStep,
-                "The matrix is not continuous so the number of rows can not be changed" );
-
-            total_width = total_size / new_rows;
-
-            if( total_width * new_rows != total_size )
-                CV_Error( cv::Error::StsBadArg, "The total number of matrix elements "
-                                        "is not divisible by the new number of rows" );
-        }
-
-        header.rows = new_rows;
-        header.cols = total_width / new_cn;
-
-        if( header.cols * new_cn != total_width ||
-            (new_sizes && header.cols != new_sizes[1]) )
-            CV_Error( cv::Error::StsBadArg, "The total matrix width is not "
-                            "divisible by the new number of columns" );
-
-        header.type = (mat->type & ~CV_MAT_TYPE_MASK) | CV_MAKETYPE(mat->type, new_cn);
-        header.step = header.cols * CV_ELEM_SIZE(mat->type);
-        header.step &= new_rows > 1 ? -1 : 0;
-        header.refcount = refcount;
-        header.hdr_refcount = hdr_refcount;
-
-        if( sizeof_header == sizeof(CvMat) )
-            *(CvMat*)_header = header;
-        else
-        {
-            CvMatND* __header = (CvMatND*)_header;
-            cvGetMatND(&header, __header, 0);
-            if( new_dims > 0 )
-                __header->dims = new_dims;
-        }
-    }
-    else
-    {
-        CvMatND* header = (CvMatND*)_header;
-
-        if( sizeof_header != sizeof(CvMatND))
-            CV_Error( cv::Error::StsBadSize, "The output header should be CvMatND" );
-
-        if( !new_sizes )
-        {
-            if( !CV_IS_MATND( arr ))
-                CV_Error( cv::Error::StsBadArg, "The input array must be CvMatND" );
-
-            {
-            CvMatND* mat = (CvMatND*)arr;
-            CV_Assert( new_cn > 0 );
-            int last_dim_size = mat->dim[mat->dims-1].size*CV_MAT_CN(mat->type);
-            int new_size = last_dim_size/new_cn;
-
-            if( new_size*new_cn != last_dim_size )
-                CV_Error( cv::Error::StsBadArg,
-                "The last dimension full size is not divisible by new number of channels");
-
-            if( mat != header )
-            {
-                memcpy( header, mat, sizeof(*header));
-                header->refcount = 0;
-                header->hdr_refcount = 0;
-            }
-
-            header->dim[header->dims-1].size = new_size;
-            header->type = (header->type & ~CV_MAT_TYPE_MASK) | CV_MAKETYPE(header->type, new_cn);
-            }
-        }
-        else
-        {
-            CvMatND stub;
-            CvMatND* mat = (CvMatND*)arr;
-            int i, size1, size2;
-            int step;
-
-            if( new_cn != 0 )
-                CV_Error( cv::Error::StsBadArg,
-                "Simultaneous change of shape and number of channels is not supported. "
-                "Do it by 2 separate calls" );
-
-            if( !CV_IS_MATND( mat ))
-            {
-                cvGetMatND( mat, &stub, &coi );
-                mat = &stub;
-            }
-
-            if( CV_IS_MAT_CONT( mat->type ))
-                CV_Error( cv::Error::StsBadArg, "Non-continuous nD arrays are not supported" );
-
-            size1 = mat->dim[0].size;
-            for( i = 1; i < dims; i++ )
-                size1 *= mat->dim[i].size;
-
-            size2 = 1;
-            for( i = 0; i < new_dims; i++ )
-            {
-                if( new_sizes[i] <= 0 )
-                    CV_Error( cv::Error::StsBadSize,
-                    "One of new dimension sizes is non-positive" );
-                size2 *= new_sizes[i];
-            }
-
-            if( size1 != size2 )
-                CV_Error( cv::Error::StsBadSize,
-                "Number of elements in the original and reshaped array is different" );
-
-            if( header != mat )
-            {
-                header->refcount = 0;
-                header->hdr_refcount = 0;
-            }
-
-            header->dims = new_dims;
-            header->type = mat->type;
-            header->data.ptr = mat->data.ptr;
-            step = CV_ELEM_SIZE(header->type);
-
-            for( i = new_dims - 1; i >= 0; i-- )
-            {
-                header->dim[i].size = new_sizes[i];
-                header->dim[i].step = step;
-                step *= new_sizes[i];
-            }
-        }
-    }
-
-    if( coi )
-        CV_Error( cv::Error::BadCOI, "COI is not supported by this operation" );
-
-    result = _header;
-    return result;
-}
-
-
 CV_IMPL CvMat*
 cvReshape( const CvArr* array, CvMat* header,
            int new_cn, int new_rows )
@@ -2916,7 +2464,7 @@ cvInitImageHeader( IplImage * image, CvSize size, int depth,
     const char *colorModel, *channelSeq;
 
     if( !image )
-        CV_Error( CV_HeaderIsNull, "null pointer to header" );
+        CV_Error( cv::Error::HeaderIsNull, "null pointer to header" );
 
     *image = cvIplImage();
 
@@ -2935,7 +2483,7 @@ cvInitImageHeader( IplImage * image, CvSize size, int depth,
     }
 
     if( size.width < 0 || size.height < 0 )
-        CV_Error( CV_BadROISize, "Bad input roi" );
+        CV_Error( cv::Error::BadROISize, "Bad input roi" );
 
     if( (depth != (int)IPL_DEPTH_1U && depth != (int)IPL_DEPTH_8U &&
          depth != (int)IPL_DEPTH_8S && depth != (int)IPL_DEPTH_16U &&
@@ -2944,10 +2492,10 @@ cvInitImageHeader( IplImage * image, CvSize size, int depth,
          channels < 0 )
         CV_Error( cv::Error::BadDepth, "Unsupported format" );
     if( origin != CV_ORIGIN_BL && origin != CV_ORIGIN_TL )
-        CV_Error( CV_BadOrigin, "Bad input origin" );
+        CV_Error( cv::Error::BadOrigin, "Bad input origin" );
 
     if( align != 4 && align != 8 )
-        CV_Error( CV_BadAlign, "Bad input align" );
+        CV_Error( cv::Error::BadAlign, "Bad input align" );
 
     image->width = size.width;
     image->height = size.height;
@@ -3020,7 +2568,7 @@ CV_IMPL void
 cvSetImageROI( IplImage* image, CvRect rect )
 {
     if( !image )
-        CV_Error( CV_HeaderIsNull, "" );
+        CV_Error( cv::Error::HeaderIsNull, "" );
 
     // allow zero ROI width or height
     CV_Assert( rect.width >= 0 && rect.height >= 0 &&
@@ -3055,7 +2603,7 @@ CV_IMPL void
 cvResetImageROI( IplImage* image )
 {
     if( !image )
-        CV_Error( CV_HeaderIsNull, "" );
+        CV_Error( cv::Error::HeaderIsNull, "" );
 
     if( image->roi )
     {
@@ -3093,7 +2641,7 @@ CV_IMPL void
 cvSetImageCOI( IplImage* image, int coi )
 {
     if( !image )
-        CV_Error( CV_HeaderIsNull, "" );
+        CV_Error( cv::Error::HeaderIsNull, "" );
 
     if( (unsigned)coi > (unsigned)(image->nChannels) )
         CV_Error( cv::Error::BadCOI, "" );
@@ -3116,7 +2664,7 @@ CV_IMPL int
 cvGetImageCOI( const IplImage* image )
 {
     if( !image )
-        CV_Error( CV_HeaderIsNull, "" );
+        CV_Error( cv::Error::HeaderIsNull, "" );
 
     return image->roi ? image->roi->coi : 0;
 }
@@ -3232,21 +2780,6 @@ cvRelease( void** struct_ptr )
         else
             CV_Error( cv::Error::StsError, "Unknown object type" );
     }
-}
-
-void* cvClone( const void* struct_ptr )
-{
-    void* ptr = 0;
-    if( !struct_ptr )
-        CV_Error( cv::Error::StsNullPtr, "NULL structure pointer" );
-
-    if( CV_IS_MAT(struct_ptr) )
-        ptr = cvCloneMat((const CvMat*)struct_ptr);
-    else if( CV_IS_IMAGE(struct_ptr))
-        ptr = cvCloneImage((const IplImage*)struct_ptr);
-    else
-        CV_Error( cv::Error::StsError, "Unknown object type" );
-    return ptr;
 }
 
 

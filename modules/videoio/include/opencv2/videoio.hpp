@@ -57,7 +57,6 @@
     @defgroup videoio_flags_base Flags for video I/O
     @defgroup videoio_flags_others Additional flags for video I/O API backends
     @defgroup videoio_hwaccel Hardware-accelerated video decoding and encoding
-    @defgroup videoio_c C API for video I/O
     @defgroup videoio_ios iOS glue for video I/O
     @defgroup videoio_winrt WinRT glue for video I/O
     @defgroup videoio_registry Query I/O API backends registry
@@ -94,7 +93,6 @@ https://learn.microsoft.com/en-us/windows/win32/medfound/mf-readwrite-enable-har
 */
 enum VideoCaptureAPIs {
        CAP_ANY          = 0,            //!< Auto detect == 0
-       CAP_VFW          = 200,          //!< Video For Windows (obsolete, removed)
        CAP_V4L          = 200,          //!< V4L/V4L2 capturing support
        CAP_V4L2         = CAP_V4L,      //!< Same as CAP_V4L
        CAP_FIREWIRE     = 300,          //!< IEEE 1394 drivers
@@ -102,16 +100,11 @@ enum VideoCaptureAPIs {
        CAP_IEEE1394     = CAP_FIREWIRE, //!< Same value as CAP_FIREWIRE
        CAP_DC1394       = CAP_FIREWIRE, //!< Same value as CAP_FIREWIRE
        CAP_CMU1394      = CAP_FIREWIRE, //!< Same value as CAP_FIREWIRE
-       CAP_QT           = 500,          //!< QuickTime (obsolete, removed)
-       CAP_UNICAP       = 600,          //!< Unicap drivers (obsolete, removed)
        CAP_DSHOW        = 700,          //!< DirectShow (via videoInput)
        CAP_PVAPI        = 800,          //!< PvAPI, Prosilica GigE SDK
-       CAP_OPENNI       = 900,          //!< OpenNI (for Kinect)
-       CAP_OPENNI_ASUS  = 910,          //!< OpenNI (for Asus Xtion)
        CAP_ANDROID      = 1000,         //!< MediaNDK (API Level 21+) and NDK Camera (API level 24+) for Android
        CAP_XIAPI        = 1100,         //!< XIMEA Camera API
        CAP_AVFOUNDATION = 1200,         //!< AVFoundation framework for iOS (OS X Lion will have the same API)
-       CAP_GIGANETIX    = 1300,         //!< Smartek Giganetix GigEVisionSDK
        CAP_MSMF         = 1400,         //!< Microsoft Media Foundation (via videoInput). See platform specific notes above.
        CAP_WINRT        = 1410,         //!< Microsoft Windows Runtime using Media Foundation
        CAP_INTELPERC    = 1500,         //!< RealSense (former Intel Perceptual Computing SDK)
@@ -717,10 +710,6 @@ namespace internal { class VideoCapturePrivateAccessor; }
 
 The class provides C++ API for capturing video from cameras or for reading video files and image sequences.
 
-Here is how the class can be used:
-@include samples/cpp/videocapture_basic.cpp
-
-@note In @ref videoio_c "C API" the black-box structure `CvCapture` is used instead of %VideoCapture.
 @note
 -   (C++) A basic sample on using the %VideoCapture interface can be found at
     `OPENCV_SOURCE_CODE/samples/cpp/videocapture_starter.cpp`
@@ -735,9 +724,6 @@ class CV_EXPORTS_W VideoCapture
 {
 public:
     /** @brief Default constructor
-    @note In @ref videoio_c "C API", when you finished working with video, release CvCapture structure with
-    cvReleaseCapture(), or use Ptr\<CvCapture\> that calls cvReleaseCapture() automatically in the
-    destructor.
      */
     CV_WRAP VideoCapture();
 
@@ -888,10 +874,6 @@ public:
     and the function returns an empty image (with %cv::Mat, test it with Mat::empty()).
 
     @sa read()
-
-    @note In @ref videoio_c "C API", functions cvRetrieveFrame() and cv.RetrieveFrame() return image stored inside the video
-    capturing structure. It is not allowed to modify or release the image! You can copy the frame using
-    cvCloneImage and then do whatever you want with the copy.
      */
     CV_WRAP virtual bool retrieve(OutputArray image, int flag = 0);
 
@@ -914,10 +896,6 @@ public:
     most convenient method for reading video files or capturing data from decode and returns the just
     grabbed frame. If no frames has been grabbed (camera has been disconnected, or there are no more
     frames in video file), the method returns false and the function returns empty image (with %cv::Mat, test it with Mat::empty()).
-
-    @note In @ref videoio_c "C API", functions cvRetrieveFrame() and cv.RetrieveFrame() return image stored inside the video
-    capturing structure. It is not allowed to modify or release the image! You can copy the frame using
-    cvCloneImage and then do whatever you want with the copy.
      */
     CV_WRAP virtual bool read(OutputArray image);
 
@@ -1002,7 +980,7 @@ Check @ref tutorial_video_write "the corresponding tutorial" for more details
 */
 
 /** @example samples/cpp/videowriter_basic.cpp
-An example using VideoCapture and VideoWriter class
+An example using VideoWriter class
 */
 
 /** @brief Video writer class.

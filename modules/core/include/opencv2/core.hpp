@@ -101,54 +101,8 @@
 
 namespace cv {
 
-//! @addtogroup core_utils
+//! @addtogroup core
 //! @{
-
-/*! @brief Class passed to an error.
-
-This class encapsulates all or almost all necessary
-information about the error happened in the program. The exception is
-usually constructed and thrown implicitly via CV_Error and CV_Error_ macros.
-@see error
- */
-class CV_EXPORTS Exception : public std::exception
-{
-public:
-    /*!
-     Default constructor
-     */
-    Exception();
-    /*!
-     Full constructor. Normally the constructor is not called explicitly.
-     Instead, the macros CV_Error(), CV_Error_() and CV_Assert() are used.
-    */
-    Exception(int _code, const String& _err, const String& _func, const String& _file, int _line);
-    virtual ~Exception() CV_NOEXCEPT;
-
-    /*!
-     \return the error description and the context as a text string.
-    */
-    virtual const char *what() const CV_NOEXCEPT CV_OVERRIDE;
-    void formatMessage();
-
-    String msg; ///< the formatted error message
-
-    int code; ///< error code @see CVStatus
-    String err; ///< error description
-    String func; ///< function name. Available only when the compiler supports getting it
-    String file; ///< source file name where the error has occurred
-    int line; ///< line number in the source file where the error has occurred
-};
-
-/*! @brief Signals an error and raises the exception.
-
-By default the function prints information about the error to stderr,
-then it either stops if cv::setBreakOnError() had been called before or raises the exception.
-It is possible to alternate error processing by using #redirectError().
-@param exc the exception raisen.
-@deprecated drop this version
- */
-CV_EXPORTS CV_NORETURN void error(const Exception& exc);
 
 enum SortFlags { SORT_EVERY_ROW    = 0, //!< each matrix row is sorted independently
                  SORT_EVERY_COLUMN = 1, //!< each matrix column is sorted
@@ -160,11 +114,6 @@ enum SortFlags { SORT_EVERY_ROW    = 0, //!< each matrix row is sorted independe
                                         //!< descending order; this flag and the previous one are also
                                         //!< mutually exclusive.
                };
-
-//! @} core_utils
-
-//! @addtogroup core
-//! @{
 
 //! Covariation flags
 enum CovarFlags {
@@ -352,8 +301,8 @@ result of an incorrect sign in the case of overflow.
 @param src2 second input array or a scalar.
 @param dst output array that has the same size and number of channels as the input array(s); the
 depth is defined by dtype or src1/src2.
-@param mask optional operation mask - 8-bit single channel array, that specifies elements of the
-output array to be changed.
+@param mask optional operation mask - CV_8U, CV_8S or CV_Bool single channel array, that specifies elements
+of the output array to be changed.
 @param dtype optional depth of the output array (see the discussion below).
 @sa subtract, addWeighted, scaleAdd, Mat::convertTo
 */
@@ -395,7 +344,7 @@ result of an incorrect sign in the case of overflow.
 @param src1 first input array or a scalar.
 @param src2 second input array or a scalar.
 @param dst output array of the same size and the same number of channels as the input array.
-@param mask optional operation mask; this is an 8-bit single channel array that specifies elements
+@param mask optional operation mask; this is CV_8U, CV8S or CV_Bool single channel array that specifies elements
 of the output array to be changed.
 @param dtype optional depth of the output array
 @sa  add, addWeighted, scaleAdd, Mat::convertTo
@@ -564,6 +513,7 @@ are taken from the input array. That is, the function processes each element of 
 \f[\texttt{dst} (I)  \leftarrow \texttt{lut(src(I) + d)}\f]
 where
 \f[d =  \fork{0}{if \(\texttt{src}\) has depth \(\texttt{CV_8U}\)}{128}{if \(\texttt{src}\) has depth \(\texttt{CV_8S}\)}\f]
+@note CV_16F/CV_16BF/CV_Bool/CV_64U/CV_64S/CV_32U are not supported for lut.
 @param src input array of 8-bit elements.
 @param lut look-up table of 256 elements; in case of multi-channel input array, the table should
 either have a single channel (in this case the same table is used for all channels) or the same
@@ -592,6 +542,7 @@ single-channel. Or you may extract the particular channel using either extractIm
 mixChannels, or split.
 
 @note
+- CV_16F/CV_16BF/CV_Bool/CV_64U/CV_64S/CV_32U are not supported for src.
 - If the location of non-zero array elements is important, @ref findNonZero is helpful.
 - If the count of non-zero array elements is important, @ref countNonZero is helpful.
 @param src single-channel array.
@@ -611,6 +562,7 @@ single-channel. Or you may extract the particular channel using either extractIm
 mixChannels, or split.
 
 @note
+- CV_16F/CV_16BF/CV_Bool/CV_64U/CV_64S/CV_32U are not supported for src.
 - If only whether there are non-zero elements is important, @ref hasNonZero is helpful.
 - If the location of non-zero array elements is important, @ref findNonZero is helpful.
 @param src single-channel array.
@@ -649,6 +601,7 @@ single-channel. Or you may extract the particular channel using either extractIm
 mixChannels, or split.
 
 @note
+- CV_16F/CV_16BF/CV_Bool/CV_64U/CV_64S/CV_32U are not supported for src.
 - If only count of non-zero array elements is important, @ref countNonZero is helpful.
 - If only whether there are non-zero elements is important, @ref hasNonZero is helpful.
 @param src single-channel array
@@ -665,7 +618,7 @@ independently for each channel, and return it:
 When all the mask elements are 0's, the function returns Scalar::all(0)
 @param src input array that should have from 1 to 4 channels so that the result can be stored in
 Scalar_ .
-@param mask optional operation mask.
+@param mask optional operation mask ot type CV_8U, CV_8S or CV_Bool.
 @sa  countNonZero, meanStdDev, norm, minMaxLoc
 */
 CV_EXPORTS_W Scalar mean(InputArray src, InputArray mask = noArray());
@@ -687,7 +640,7 @@ then pass the matrix to calcCovarMatrix .
 Scalar_ 's.
 @param mean output parameter: calculated mean value.
 @param stddev output parameter: calculated standard deviation.
-@param mask optional operation mask.
+@param mask optional operation mask of type CV_8U, CV_8S or CV_Bool.
 @sa  countNonZero, mean, norm, minMaxLoc, calcCovarMatrix
 */
 CV_EXPORTS_W void meanStdDev(InputArray src, OutputArray mean, OutputArray stddev,
@@ -727,7 +680,7 @@ Hamming norms can only be calculated with CV_8U depth arrays.
 
 @param src1 first input array.
 @param normType type of the norm (see #NormTypes).
-@param mask optional operation mask; it must have the same size as src1 and CV_8UC1 type.
+@param mask optional operation mask; it must have the same size as src1 and type CV_8UC1, CV_8SC1 or CV_BoolC1.
 */
 CV_EXPORTS_W double norm(InputArray src1, int normType = NORM_L2, InputArray mask = noArray());
 
@@ -740,7 +693,7 @@ The type of norm to calculate is specified using #NormTypes.
 @param src1 first input array.
 @param src2 second input array of the same size and the same type as src1.
 @param normType type of the norm (see #NormTypes).
-@param mask optional operation mask; it must have the same size as src1 and CV_8UC1 type.
+@param mask optional operation mask; it must have the same size as src1 and type CV_8UC1, CV_8S1 or CV_BoolC1.
 */
 CV_EXPORTS_W double norm(InputArray src1, InputArray src2,
                          int normType = NORM_L2, InputArray mask = noArray());
@@ -837,7 +790,7 @@ normalization.
 @param norm_type normalization type (see cv::NormTypes).
 @param dtype when negative, the output array has the same type as src; otherwise, it has the same
 number of channels as src and the depth =CV_MAT_DEPTH(dtype).
-@param mask optional operation mask.
+@param mask optional operation mask of type CV_8U, CV_8S or CV_Bool.
 @sa norm, Mat::convertTo, SparseMat::convertTo
 */
 CV_EXPORTS_W void normalize( InputArray src, InputOutputArray dst, double alpha = 1, double beta = 0,
@@ -862,12 +815,13 @@ The function do not work with multi-channel arrays. If you need to find minimum 
 elements across all the channels, use Mat::reshape first to reinterpret the array as
 single-channel. Or you may extract the particular channel using either extractImageCOI, or
 mixChannels, or split.
+@note CV_16F/CV_16BF/CV_Bool/CV_64U/CV_64S/CV_32U are not supported for src.
 @param src input single-channel array.
 @param minVal pointer to the returned minimum value; NULL is used if not required.
 @param maxVal pointer to the returned maximum value; NULL is used if not required.
 @param minLoc pointer to the returned minimum location (in 2D case); NULL is used if not required.
 @param maxLoc pointer to the returned maximum location (in 2D case); NULL is used if not required.
-@param mask optional mask used to select a sub-array.
+@param mask optional mask used to select a sub-array of type CV_8U, CV_8S or CV_Bool.
 @sa max, min, reduceArgMin, reduceArgMax, compare, inRange, extractImageCOI, mixChannels, split, Mat::reshape
 */
 CV_EXPORTS_W void minMaxLoc(InputArray src, CV_OUT double* minVal,
@@ -919,6 +873,7 @@ a single-row or single-column matrix. In OpenCV (following MATLAB) each array ha
 dimensions, i.e. single-column matrix is Mx1 matrix (and therefore minIdx/maxIdx will be
 (i1,0)/(i2,0)) and single-row matrix is 1xN matrix (and therefore minIdx/maxIdx will be
 (0,j1)/(0,j2)).
+@note CV_16F/CV_16BF/CV_Bool/CV_64U/CV_64S/CV_32U are not supported for src.
 @param src input single-channel array.
 @param minVal pointer to the returned minimum value; NULL is used if not required.
 @param maxVal pointer to the returned maximum value; NULL is used if not required.
@@ -1353,7 +1308,7 @@ converted to the array type.
 @param src2 second input array or a scalar.
 @param dst output array that has the same size and type as the input
 arrays.
-@param mask optional operation mask, 8-bit single channel array, that
+@param mask optional operation mask, CV_8U, CV_8S or CV_Bool single channel array, that
 specifies elements of the output array to be changed.
 */
 CV_EXPORTS_W void bitwise_and(InputArray src1, InputArray src2,
@@ -1380,7 +1335,7 @@ converted to the array type.
 @param src2 second input array or a scalar.
 @param dst output array that has the same size and type as the input
 arrays.
-@param mask optional operation mask, 8-bit single channel array, that
+@param mask optional operation mask, CV_8U, CV_8S or CV_Bool single channel array, that
 specifies elements of the output array to be changed.
 */
 CV_EXPORTS_W void bitwise_or(InputArray src1, InputArray src2,
@@ -1408,7 +1363,7 @@ converted to the array type.
 @param src2 second input array or a scalar.
 @param dst output array that has the same size and type as the input
 arrays.
-@param mask optional operation mask, 8-bit single channel array, that
+@param mask optional operation mask, CV_8U, CV_8S or CV_Bool single channel array, that
 specifies elements of the output array to be changed.
 */
 CV_EXPORTS_W void bitwise_xor(InputArray src1, InputArray src2,
@@ -1425,7 +1380,7 @@ case of multi-channel arrays, each channel is processed independently.
 @param src input array.
 @param dst output array that has the same size and type as the input
 array.
-@param mask optional operation mask, 8-bit single channel array, that
+@param mask optional operation mask, CV_8U, CV_8S or CV_Bool single channel array, that
 specifies elements of the output array to be changed.
 */
 CV_EXPORTS_W void bitwise_not(InputArray src, OutputArray dst,
@@ -1466,7 +1421,7 @@ When the operation mask is specified, if the Mat::create call shown above reallo
 @param dst Destination matrix. If it does not have a proper size or type before the operation, it is
 reallocated.
 @param mask Operation mask of the same size as \*this. Its non-zero elements indicate which matrix
-elements need to be copied. The mask has to be of type CV_8U and can have 1 or multiple channels.
+elements need to be copied. The mask has to be of type CV_8U, CV_8S or CV_Bool and can have 1 or multiple channels.
 */
 
 void CV_EXPORTS_W copyTo(InputArray src, OutputArray dst, InputArray mask);
@@ -1723,10 +1678,19 @@ CV_EXPORTS_W bool checkRange(InputArray a, bool quiet = true, CV_OUT Point* pos 
                             double minVal = -DBL_MAX, double maxVal = DBL_MAX);
 
 /** @brief Replaces NaNs by given number
-@param a input/output matrix (CV_32F type).
+@param a input/output matrix (CV_32F or CV_64F type)
 @param val value to convert the NaNs
 */
 CV_EXPORTS_W void patchNaNs(InputOutputArray a, double val = 0);
+
+/** @brief Generates a mask of finite float values, i.e. not NaNs nor Infs.
+
+An element is set to to 255 (all 1-bits) if all channels are finite.
+@param src Input matrix, should contain float or double elements of 1 to 4 channels
+@param mask Output matrix of the same size as input of type CV_8UC1
+*/
+CV_EXPORTS_W void finiteMask(InputArray src, OutputArray mask);
+
 
 /** @brief Performs generalized matrix multiplication.
 
@@ -2145,6 +2109,10 @@ the invert function (preferably using the #DECOMP_SVD method, as the most accura
 */
 CV_EXPORTS_W double Mahalanobis(InputArray v1, InputArray v2, InputArray icovar);
 
+/** @example samples/python/snippets/dft.py
+An example on Discrete Fourier transform (DFT) in python.
+*/
+
 /** @brief Performs a forward or inverse Discrete Fourier transform of a 1D or 2D floating-point array.
 
 The function cv::dft performs one of the following:
@@ -2197,47 +2165,9 @@ current implementation). Such an efficient DFT size can be calculated using the 
 method.
 
 The sample below illustrates how to calculate a DFT-based convolution of two 2D real arrays:
-@code
-    void convolveDFT(InputArray A, InputArray B, OutputArray C)
-    {
-        // reallocate the output array if needed
-        C.create(abs(A.rows - B.rows)+1, abs(A.cols - B.cols)+1, A.type());
-        Size dftSize;
-        // calculate the size of DFT transform
-        dftSize.width = getOptimalDFTSize(A.cols + B.cols - 1);
-        dftSize.height = getOptimalDFTSize(A.rows + B.rows - 1);
+ @include samples/cpp/snippets/dft.cpp
+ An example on DFT-based convolution
 
-        // allocate temporary buffers and initialize them with 0's
-        Mat tempA(dftSize, A.type(), Scalar::all(0));
-        Mat tempB(dftSize, B.type(), Scalar::all(0));
-
-        // copy A and B to the top-left corners of tempA and tempB, respectively
-        Mat roiA(tempA, Rect(0,0,A.cols,A.rows));
-        A.copyTo(roiA);
-        Mat roiB(tempB, Rect(0,0,B.cols,B.rows));
-        B.copyTo(roiB);
-
-        // now transform the padded A & B in-place;
-        // use "nonzeroRows" hint for faster processing
-        dft(tempA, tempA, 0, A.rows);
-        dft(tempB, tempB, 0, B.rows);
-
-        // multiply the spectrums;
-        // the function handles packed spectrum representations well
-        mulSpectrums(tempA, tempB, tempA);
-
-        // transform the product back from the frequency domain.
-        // Even though all the result rows will be non-zero,
-        // you need only the first C.rows of them, and thus you
-        // pass nonzeroRows == C.rows
-        dft(tempA, tempA, DFT_INVERSE + DFT_SCALE, C.rows);
-
-        // now copy the result back to C.
-        tempA(Rect(0, 0, C.cols, C.rows)).copyTo(C);
-
-        // all the temporary buffers will be deallocated automatically
-    }
-@endcode
 To optimize this sample, consider the following approaches:
 -   Since nonzeroRows != 0 is passed to the forward transform calls and since A and B are copied to
     the top-left corners of tempA and tempB, respectively, it is not necessary to clear the whole
@@ -3077,8 +3007,11 @@ private:
 //! @addtogroup core_cluster
 //!  @{
 
-/** @example samples/cpp/kmeans.cpp
-An example on K-means clustering
+/** @example samples/cpp/snippets/kmeans.cpp
+An example on k-means clustering
+*/
+/** @example samples/python/snippets/kmeans.py
+An example on k-means clustering in python
 */
 
 /** @brief Finds centers of clusters and groups input samples around the clusters.
@@ -3192,6 +3125,10 @@ etc.).
 
 Here is example of SimpleBlobDetector use in your application via Algorithm interface:
 @snippet snippets/core_various.cpp Algorithm
+
+@example samples/cpp/snippets/detect_blob.cpp
+An example using the BLOB to detect and filter region.
+
 */
 class CV_EXPORTS_W Algorithm
 {
@@ -3416,6 +3353,5 @@ struct ParamType<_Tp, typename std::enable_if< std::is_enum<_Tp>::value >::type>
 #include "opencv2/core/cvstd.inl.hpp"
 #include "opencv2/core/utility.hpp"
 #include "opencv2/core/optim.hpp"
-#include "opencv2/core/ovx.hpp"
 
 #endif /*OPENCV_CORE_HPP*/

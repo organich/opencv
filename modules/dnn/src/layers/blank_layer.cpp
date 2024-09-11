@@ -82,6 +82,17 @@ public:
         return true;
     }
 
+    void getTypes(const std::vector<MatType>& inputs,
+        const int requiredOutputs,
+        const int requiredInternals,
+        std::vector<MatType>& outputs,
+        std::vector<MatType>& internals) const CV_OVERRIDE
+    {
+        CV_Assert(inputs.size());
+        outputs = inputs;
+    }
+
+
 #ifdef HAVE_OPENCL
     bool forward_ocl(InputArrayOfArrays inputs_, OutputArrayOfArrays outputs_, OutputArrayOfArrays internals_)
     {
@@ -115,7 +126,8 @@ public:
         inputs_arr.getMatVector(inputs);
         outputs_arr.getMatVector(outputs);
 
-        for (int i = 0, n = outputs.size(); i < n; ++i)
+        size_t i, n = outputs.size();
+        for (i = 0; i < n; ++i)
             if (outputs[i].data != inputs[i].data)
                 inputs[i].copyTo(outputs[i]);
     }
@@ -149,8 +161,11 @@ public:
                                         const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE
     {
         auto ieInpNode = nodes[0].dynamicCast<InfEngineNgraphNode>()->node;
-        ov::OutputVector inp{ieInpNode};
-        auto blank = std::make_shared<ov::op::v0::Concat>(inp, 0);
+        // We use Reshape as blank layer.
+        // Previously, we used Concat layer, but it didn't work with scalar tensor.
+        // Also we used ConvertLike layer, but it did't work with old OpenVINO versions.
+        auto shape = std::make_shared<ov::op::v0::ShapeOf>(ieInpNode);
+        auto blank = std::make_shared<ov::op::v1::Reshape>(ieInpNode, shape, false);
         return Ptr<BackendNode>(new InfEngineNgraphNode(blank));
     }
 #endif  // HAVE_DNN_NGRAPH
@@ -164,15 +179,12 @@ public:
     ) override
     {
         auto context = reinterpret_cast<csl::CSLContext*>(context_);
-        return make_cuda_node<cuda4dnn::ReshapeOp>(preferableTarget, std::move(context->stream));
+        if (inputs[0]->getHostMatDepth() == CV_Bool)
+            return make_cuda_node_bool<cuda4dnn::ReshapeOp>(std::move(context->stream));
+        else
+            return make_cuda_node_with_type<cuda4dnn::ReshapeOp>(preferableTarget, inputs[0]->getHostMatDepth(), std::move(context->stream));
     }
 #endif
-
-    virtual bool tryQuantize(const std::vector<std::vector<float> > &scales,
-                             const std::vector<std::vector<int> > &zeropoints, LayerParams& params) CV_OVERRIDE
-    {
-        return true;
-    }
 };
 
 Ptr<Layer> BlankLayer::create(const LayerParams& params)

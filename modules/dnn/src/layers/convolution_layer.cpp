@@ -43,7 +43,6 @@
 #include "../precomp.hpp"
 #include "layers_common.hpp"
 #include "../op_cuda.hpp"
-#include "../op_halide.hpp"
 #include "../op_inf_engine.hpp"
 #include "../ie_ngraph.hpp"
 #include "../op_vkcom.hpp"
@@ -199,46 +198,6 @@ public:
     }
 
     virtual void fuseWeights(const Mat& w_, const Mat& b_) = 0;
-
-    virtual void applyHalideScheduler(Ptr<BackendNode>& node,
-                                      const std::vector<Mat*> &inputs,
-                                      const std::vector<Mat> &outputs,
-                                      int targetId) const CV_OVERRIDE
-    {
-#ifdef HAVE_HALIDE
-        if (targetId != DNN_TARGET_CPU)
-        {
-            Layer::applyHalideScheduler(node, inputs, outputs, targetId);
-            return;
-        }
-        Halide::Var x("x"), y("y"), c("c"), n("n"), tile("tile"), yi("yi"), yo("yo"), co("co"), ci("ci");
-        Halide::Func& top = node.dynamicCast<HalideBackendNode>()->funcs[1];
-        Halide::Func& padded_input = node.dynamicCast<HalideBackendNode>()->funcs[0];
-
-        int outW, outH, outC, outN;
-        getCanonicalSize(outputs[0].size, &outW, &outH, &outC, &outN);
-
-        if (outW == 1 || outH <= 2)
-            return;
-
-        if (is1x1() || outC <= 16)
-            top.reorder(x, c, y)
-               .split(y, yo, yi, 2)
-               .fuse(yo, n, tile)
-               .parallel(tile)
-               .unroll(yi)
-               .vectorize(x, outW >= 16 ? 16 : outW);
-        else
-            top.reorder(x, c, y)
-               .split(y, yo, yi, 2)
-               .split(c, co, ci, 16)
-               .fuse(yo, co, tile).fuse(n, tile, tile)
-               .parallel(tile)
-               .unroll(yi)
-               .vectorize(x, outW >= 16 ? 16 : outW);
-        padded_input.compute_at(top, yi);
-#endif  // HAVE_HALIDE
-    }
 };
 
 
@@ -327,10 +286,6 @@ public:
 #endif
         if (backendId == DNN_BACKEND_OPENCV)
             return ksize >= 1 && ksize <= 3;
-#ifdef HAVE_HALIDE
-        if (backendId == DNN_BACKEND_HALIDE)
-            return ksize == 2 && !blobs.empty();
-#endif
 #ifdef HAVE_VULKAN
         if (backendId == DNN_BACKEND_VKCOM)
             return ksize == 2;
@@ -679,55 +634,6 @@ public:
 
         return Ptr<BackendNode>(new VkComBackendNode(inputs, op, outputs));
 #endif  // HAVE_VULKAN
-        return Ptr<BackendNode>();
-    }
-
-    virtual Ptr<BackendNode> initHalide(const std::vector<Ptr<BackendWrapper> > &inputs) CV_OVERRIDE
-    {
-#ifdef HAVE_HALIDE
-        CV_Assert(!blobs.empty());
-        Halide::Buffer<float> inputBuffer = halideBuffer(inputs[0]);
-
-        const int inpCn = inputBuffer.channels();
-        const int outCn = blobs[0].size[0];
-        const int inpGroupCn = blobs[0].size[1];
-        const int group = inpCn / inpGroupCn;
-        const int outGroupCn = outCn / group;
-
-        Halide::Buffer<float> weights = wrapToHalideBuffer(blobs[0]);
-
-        Halide::Var x("x"), y("y"), c("c"), n("n");
-        Halide::Func top = (name.empty() ? Halide::Func() : Halide::Func(name));
-        Halide::Func padded_input(name + "_constant_exterior");
-        if (pad.width || pad.height)
-        {
-            Halide::Func bounded =
-                Halide::BoundaryConditions::constant_exterior(inputBuffer, 0);
-            padded_input(x, y, c, n) = bounded(x, y, c, n);
-        }
-        else
-        {
-            padded_input(x, y, c, n) = inputBuffer(x, y, c, n);
-        }
-
-        Halide::RDom r(0, kernel.width, 0, kernel.height, 0, inpGroupCn);
-        Halide::Expr kx = x * stride.width - pad.width + r.x * dilation.width;
-        Halide::Expr ky = y * stride.height - pad.height + r.y * dilation.height;
-        Halide::Expr kc = r.z;
-        for (int i = 1; i < group; ++i)
-        {
-            kc = select(c < outGroupCn * i, kc, inpGroupCn * i + r.z);
-        }
-        Halide::Expr topExpr = sum(padded_input(kx, ky, kc, n) *
-                                   weights(r.x, r.y, r.z, c));
-        if (hasBias())
-        {
-            Halide::Buffer<float> bias = wrapToHalideBuffer(blobs[1], {outCn});
-            topExpr += bias(c);
-        }
-        top(x, y, c, n) = topExpr;
-        return Ptr<BackendNode>(new HalideBackendNode({ padded_input, top }));
-#endif  // HAVE_HALIDE
         return Ptr<BackendNode>();
     }
 
@@ -1395,60 +1301,6 @@ public:
     }
 #endif
 
-    virtual bool tryQuantize(const std::vector<std::vector<float> > &scales,
-                             const std::vector<std::vector<int> > &zeropoints, LayerParams& params) CV_OVERRIDE
-    {
-        // References - https://arxiv.org/pdf/1712.05877.pdf
-
-        // Quantized convolution with variable weights is not supported.
-        if (blobs.empty())
-            return false;
-
-        float inputScale = scales[0][0], outputScale = scales[1][0];
-        int inputZp = zeropoints[0][0];
-        params.set("input_zeropoint", inputZp);
-        params.set("input_scale", inputScale);
-
-        Mat weightsMat = blobs[0].reshape(1, numOutput);
-        Mat weightsQuantized(weightsMat.rows, weightsMat.cols, CV_8S);
-        Mat biasQuantized(1, numOutput, CV_32S);
-        Mat outputMultiplier(1, numOutput, CV_32F);
-        bool perChannel = params.get<bool>("per_channel", true);
-
-        if (perChannel) // per-Channel quantization.
-        {
-            for (int i = 0; i < numOutput; i++)
-            {
-                double weightsScale = getWeightScale(weightsMat.row(i));
-
-                weightsMat.row(i).convertTo(weightsQuantized.row(i), CV_8S, 1.f/weightsScale);
-                float biasScale = inputScale * weightsScale;
-                biasQuantized.at<int>(i) = cvRound(biasvec[i]/biasScale) - inputZp*(cv::sum(weightsQuantized.row(i))[0]);
-                outputMultiplier.at<float>(i) = biasScale / outputScale;
-            }
-        }
-        else // per-Tensor quantization.
-        {
-            double weightsScale = getWeightScale(weightsMat);
-
-            weightsMat.convertTo(weightsQuantized, CV_8S, 1.f/weightsScale);
-            float biasScale = inputScale * weightsScale;
-
-            for (int i = 0; i < numOutput; i++)
-            {
-                biasQuantized.at<int>(i) = cvRound(biasvec[i]/biasScale) - inputZp*(cv::sum(weightsQuantized.row(i))[0]);
-                outputMultiplier.at<float>(i) = biasScale / outputScale;
-            }
-        }
-
-        params.blobs.clear();
-        params.set("per_channel", perChannel);
-        params.blobs.push_back(weightsQuantized.reshape(1, shape(blobs[0])));
-        params.blobs.push_back(biasQuantized);
-        params.blobs.push_back(outputMultiplier);
-        return true;
-    }
-
     virtual int64 getFLOPS(const std::vector<MatShape> &inputs,
                            const std::vector<MatShape> &outputs) const CV_OVERRIDE
     {
@@ -1510,7 +1362,7 @@ public:
 #endif  // HAVE_INF_ENGINE
         {
             return backendId == DNN_BACKEND_CUDA ||
-            (kernel_size.size() == 2 && (backendId == DNN_BACKEND_OPENCV || backendId == DNN_BACKEND_HALIDE)) ||
+            (kernel_size.size() == 2 && backendId == DNN_BACKEND_OPENCV) ||
             (kernel_size.size() == 2 && backendId == DNN_BACKEND_CANN);
         }
     }
@@ -2117,60 +1969,6 @@ public:
             preferableTarget, std::move(context->stream), std::move(context->cudnn_handle), config, filtersMat, biasMat);
     }
 #endif
-
-    virtual Ptr<BackendNode> initHalide(const std::vector<Ptr<BackendWrapper> > &inputs) CV_OVERRIDE
-    {
-#ifdef HAVE_HALIDE
-        CV_Assert(!blobs.empty());
-        Halide::Buffer<float> inputBuffer = halideBuffer(inputs[0]);
-
-        int inW, inH, inC, inN;
-        getCanonicalSize(inputBuffer, &inW, &inH, &inC, &inN);
-        const int outGroupCn = blobs[0].size[1];
-        const int group = numOutput / outGroupCn;
-        const int inpGroupCn = blobs[0].size[0] / group;
-
-        Halide::Var x("x"), y("y"), c("c"), n("n");
-        Halide::Func top = (name.empty() ? Halide::Func() : Halide::Func(name));
-        Halide::Func padded_input(name + "_constant_exterior");
-        auto weights = wrapToHalideBuffer(blobs[0]);
-
-        Halide::Func dilated_input("dilated_input");
-        dilated_input(x, y, c, n) = 0.0f;
-        Halide::RDom r1(0, inW, 0, inH);
-        dilated_input(r1.x * stride.width, r1.y * stride.height, c, n) =
-              inputBuffer(r1.x, r1.y, c, n);
-        dilated_input.compute_root();
-
-        Halide::Func bounded =
-            Halide::BoundaryConditions::constant_exterior(dilated_input, 0,
-                                                          0, (inW - 1) * stride.width + 1,
-                                                          0, (inH - 1) * stride.height + 1,
-                                                          0, inC, 0, inN);
-        padded_input(x, y, c, n) = bounded(x, y, c, n);
-
-        Halide::RDom r(0, kernel.width, 0, kernel.height, 0, inpGroupCn);
-        Halide::Expr kx = x + pad.width - r.x;
-        Halide::Expr ky = y + pad.height - r.y;
-        Halide::Expr kInC = r.z;
-        Halide::Expr kOutC = c;
-        for (int i = 1; i < group; ++i)
-        {
-            kInC = select(c < outGroupCn * i, kInC, inpGroupCn * i + r.z);
-            kOutC = select(c < outGroupCn * i, kOutC, c - outGroupCn * i);
-        }
-        Halide::Expr topExpr = sum(padded_input(kx, ky, kInC, n) *
-                                   weights(r.x, r.y, kOutC, kInC));
-        if (hasBias())
-        {
-            auto bias = wrapToHalideBuffer(blobs[1], {numOutput});
-            topExpr += bias(c);
-        }
-        top(x, y, c, n) = topExpr;
-        return Ptr<BackendNode>(new HalideBackendNode({ padded_input, top }));
-#endif  // HAVE_HALIDE
-        return Ptr<BackendNode>();
-    }
 
 #ifdef HAVE_CANN
     virtual Ptr<BackendNode> initCann(const std::vector<Ptr<BackendWrapper> > &inputs,

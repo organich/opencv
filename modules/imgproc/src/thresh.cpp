@@ -44,8 +44,6 @@
 #include "opencl_kernels_imgproc.hpp"
 #include "opencv2/core/hal/intrin.hpp"
 
-#include "opencv2/core/openvx/ovx_defs.hpp"
-
 namespace cv
 {
 
@@ -1443,98 +1441,6 @@ static bool ocl_threshold( InputArray _src, OutputArray _dst, double & thresh, d
 }
 
 #endif
-
-
-#ifdef HAVE_OPENVX
-#define IMPL_OPENVX_TOZERO 1
-static bool openvx_threshold(Mat src, Mat dst, int thresh, int maxval, int type)
-{
-    Mat a = src;
-
-    int trueVal, falseVal;
-    switch (type)
-    {
-    case THRESH_BINARY:
-#ifndef VX_VERSION_1_1
-        if (maxval != 255)
-            return false;
-#endif
-        trueVal = maxval;
-        falseVal = 0;
-        break;
-    case THRESH_TOZERO:
-#if IMPL_OPENVX_TOZERO
-        trueVal = 255;
-        falseVal = 0;
-        if (dst.data == src.data)
-        {
-            a = Mat(src.size(), src.type());
-            src.copyTo(a);
-        }
-        break;
-#endif
-    case THRESH_BINARY_INV:
-#ifdef VX_VERSION_1_1
-        trueVal = 0;
-        falseVal = maxval;
-        break;
-#endif
-    case THRESH_TOZERO_INV:
-#ifdef VX_VERSION_1_1
-#if IMPL_OPENVX_TOZERO
-        trueVal = 0;
-        falseVal = 255;
-        if (dst.data == src.data)
-        {
-            a = Mat(src.size(), src.type());
-            src.copyTo(a);
-        }
-        break;
-#endif
-#endif
-    case THRESH_TRUNC:
-    default:
-        return false;
-    }
-
-    try
-    {
-        ivx::Context ctx = ovx::getOpenVXContext();
-
-        ivx::Threshold thh = ivx::Threshold::createBinary(ctx, VX_TYPE_UINT8, thresh);
-        thh.setValueTrue(trueVal);
-        thh.setValueFalse(falseVal);
-
-        ivx::Image
-            ia = ivx::Image::createFromHandle(ctx, VX_DF_IMAGE_U8,
-                ivx::Image::createAddressing(a.cols*a.channels(), a.rows, 1, (vx_int32)(a.step)), src.data),
-            ib = ivx::Image::createFromHandle(ctx, VX_DF_IMAGE_U8,
-                ivx::Image::createAddressing(dst.cols*dst.channels(), dst.rows, 1, (vx_int32)(dst.step)), dst.data);
-
-        ivx::IVX_CHECK_STATUS(vxuThreshold(ctx, ia, thh, ib));
-#if IMPL_OPENVX_TOZERO
-        if (type == THRESH_TOZERO || type == THRESH_TOZERO_INV)
-        {
-            ivx::Image
-                ic = ivx::Image::createFromHandle(ctx, VX_DF_IMAGE_U8,
-                    ivx::Image::createAddressing(dst.cols*dst.channels(), dst.rows, 1, (vx_int32)(dst.step)), dst.data);
-            ivx::IVX_CHECK_STATUS(vxuAnd(ctx, ib, ia, ic));
-        }
-#endif
-    }
-    catch (const ivx::RuntimeError & e)
-    {
-        VX_DbgThrow(e.what());
-    }
-    catch (const ivx::WrapperError & e)
-    {
-        VX_DbgThrow(e.what());
-    }
-
-    return true;
-}
-#endif
-
 }
 
 double cv::threshold( InputArray _src, OutputArray _dst, double thresh, double maxval, int type )
@@ -1595,8 +1501,6 @@ double cv::threshold( InputArray _src, OutputArray _dst, double thresh, double m
             return thresh;
         }
 
-       CV_OVX_RUN(!ovx::skipSmallImages<VX_KERNEL_THRESHOLD>(src.cols, src.rows),
-                  openvx_threshold(src, dst, ithresh, imaxval, type), (double)ithresh)
 
         thresh = ithresh;
         maxval = imaxval;
@@ -1741,29 +1645,3 @@ void cv::adaptiveThreshold( InputArray _src, OutputArray _dst, double maxValue,
             ddata[j] = tab[sdata[j] - mdata[j] + 255];
     }
 }
-
-CV_IMPL double
-cvThreshold( const void* srcarr, void* dstarr, double thresh, double maxval, int type )
-{
-    cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr), dst0 = dst;
-
-    CV_Assert( src.size == dst.size && src.channels() == dst.channels() &&
-        (src.depth() == dst.depth() || dst.depth() == CV_8U));
-
-    thresh = cv::threshold( src, dst, thresh, maxval, type );
-    if( dst0.data != dst.data )
-        dst.convertTo( dst0, dst0.depth() );
-    return thresh;
-}
-
-
-CV_IMPL void
-cvAdaptiveThreshold( const void *srcIm, void *dstIm, double maxValue,
-                     int method, int type, int blockSize, double delta )
-{
-    cv::Mat src = cv::cvarrToMat(srcIm), dst = cv::cvarrToMat(dstIm);
-    CV_Assert( src.size == dst.size && src.type() == dst.type() );
-    cv::adaptiveThreshold( src, dst, maxValue, method, type, blockSize, delta );
-}
-
-/* End of file. */

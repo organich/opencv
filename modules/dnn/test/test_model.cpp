@@ -93,7 +93,7 @@ public:
 
         points = model.estimate(frame, 0.5);
 
-        Mat out = Mat(points).reshape(1);
+        Mat out = Mat(points).reshape(1, (int)points.size());
         normAssert(exp, out, "", norm, norm);
     }
 

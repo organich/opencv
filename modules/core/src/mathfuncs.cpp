@@ -79,7 +79,7 @@ static bool ocl_math_op(InputArray _src1, InputArray _src2, OutputArray _dst, in
         return false;
 
     UMat src1 = _src1.getUMat(), src2 = _src2.getUMat();
-    _dst.create(src1.size(), type);
+    _dst.createSameSize(src1, type);
     UMat dst = _dst.getUMat();
 
     ocl::KernelArg src1arg = ocl::KernelArg::ReadOnlyNoSize(src1),
@@ -1226,7 +1226,7 @@ static bool ocl_pow(InputArray _src, double power, OutputArray _dst,
         return false;
 
     UMat src = _src.getUMat();
-    _dst.create(src.size(), type);
+    _dst.createSameSize(src, type);
     UMat dst = _dst.getUMat();
 
     ocl::KernelArg srcarg = ocl::KernelArg::ReadOnlyNoSize(src),
@@ -1605,152 +1605,16 @@ bool checkRange(InputArray _src, bool quiet, Point* pt, double minVal, double ma
     return true;
 }
 
-#ifdef HAVE_OPENCL
-
-static bool ocl_patchNaNs( InputOutputArray _a, float value )
-{
-    int rowsPerWI = ocl::Device::getDefault().isIntel() ? 4 : 1;
-    ocl::Kernel k("KF", ocl::core::arithm_oclsrc,
-                     format("-D UNARY_OP -D OP_PATCH_NANS -D dstT=float -D DEPTH_dst=%d -D rowsPerWI=%d",
-                            CV_32F, rowsPerWI));
-    if (k.empty())
-        return false;
-
-    UMat a = _a.getUMat();
-    int cn = a.channels();
-
-    k.args(ocl::KernelArg::ReadOnlyNoSize(a),
-           ocl::KernelArg::WriteOnly(a, cn), (float)value);
-
-    size_t globalsize[2] = { (size_t)a.cols * cn, ((size_t)a.rows + rowsPerWI - 1) / rowsPerWI };
-    return k.run(2, globalsize, NULL, false);
-}
-
-#endif
-
-void patchNaNs( InputOutputArray _a, double _val )
-{
-    CV_INSTRUMENT_REGION();
-
-    CV_Assert( _a.depth() == CV_32F );
-
-    CV_OCL_RUN(_a.isUMat() && _a.dims() <= 2,
-               ocl_patchNaNs(_a, (float)_val))
-
-    Mat a = _a.getMat();
-    const Mat* arrays[] = {&a, 0};
-    int* ptrs[1] = {};
-    NAryMatIterator it(arrays, (uchar**)ptrs);
-    int len = (int)(it.size*a.channels());
-    Cv32suf val;
-    val.f = (float)_val;
-
-    for( size_t i = 0; i < it.nplanes; i++, ++it )
-    {
-        int* tptr = ptrs[0];
-        int j = 0;
-
-#if (CV_SIMD || CV_SIMD_SCALABLE)
-        v_int32 v_pos_mask = vx_setall_s32(0x7fffffff), v_exp_mask = vx_setall_s32(0x7f800000);
-        v_int32 v_val = vx_setall_s32(val.i);
-
-        int cWidth = VTraits<v_int32>::vlanes();
-        for (; j < len - cWidth * 2 + 1; j += cWidth * 2)
-        {
-            v_int32 v_src0 = vx_load(tptr + j);
-            v_int32 v_src1 = vx_load(tptr + j + cWidth);
-
-            v_int32 v_cmp_mask0 = v_lt(v_exp_mask, v_and(v_src0, v_pos_mask));
-            v_int32 v_cmp_mask1 = v_lt(v_exp_mask, v_and(v_src1, v_pos_mask));
-
-            if (v_check_any(v_or(v_cmp_mask0, v_cmp_mask1)))
-            {
-                v_int32 v_dst0 = v_select(v_cmp_mask0, v_val, v_src0);
-                v_int32 v_dst1 = v_select(v_cmp_mask1, v_val, v_src1);
-
-                v_store(tptr + j, v_dst0);
-                v_store(tptr + j + cWidth, v_dst1);
-            }
-        }
-#endif
-
-        for( ; j < len; j++ )
-            if( (tptr[j] & 0x7fffffff) > 0x7f800000 )
-                tptr[j] = val.i;
-    }
-}
-
-}
+} // namespace cv
 
 
 #ifndef OPENCV_EXCLUDE_C_API
-
-CV_IMPL float cvCbrt(float value) { return cv::cubeRoot(value); }
-CV_IMPL float cvFastArctan(float y, float x) { return cv::fastAtan2(y, x); }
-
-CV_IMPL void
-cvCartToPolar( const CvArr* xarr, const CvArr* yarr,
-               CvArr* magarr, CvArr* anglearr,
-               int angle_in_degrees )
-{
-    cv::Mat X = cv::cvarrToMat(xarr), Y = cv::cvarrToMat(yarr), Mag, Angle;
-    if( magarr )
-    {
-        Mag = cv::cvarrToMat(magarr);
-        CV_Assert( Mag.size() == X.size() && Mag.type() == X.type() );
-    }
-    if( anglearr )
-    {
-        Angle = cv::cvarrToMat(anglearr);
-        CV_Assert( Angle.size() == X.size() && Angle.type() == X.type() );
-    }
-    if( magarr )
-    {
-        if( anglearr )
-            cv::cartToPolar( X, Y, Mag, Angle, angle_in_degrees != 0 );
-        else
-            cv::magnitude( X, Y, Mag );
-    }
-    else
-        cv::phase( X, Y, Angle, angle_in_degrees != 0 );
-}
-
-CV_IMPL void
-cvPolarToCart( const CvArr* magarr, const CvArr* anglearr,
-               CvArr* xarr, CvArr* yarr, int angle_in_degrees )
-{
-    cv::Mat X, Y, Angle = cv::cvarrToMat(anglearr), Mag;
-    if( magarr )
-    {
-        Mag = cv::cvarrToMat(magarr);
-        CV_Assert( Mag.size() == Angle.size() && Mag.type() == Angle.type() );
-    }
-    if( xarr )
-    {
-        X = cv::cvarrToMat(xarr);
-        CV_Assert( X.size() == Angle.size() && X.type() == Angle.type() );
-    }
-    if( yarr )
-    {
-        Y = cv::cvarrToMat(yarr);
-        CV_Assert( Y.size() == Angle.size() && Y.type() == Angle.type() );
-    }
-
-    cv::polarToCart( Mag, Angle, X, Y, angle_in_degrees != 0 );
-}
 
 CV_IMPL void cvExp( const CvArr* srcarr, CvArr* dstarr )
 {
     cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr);
     CV_Assert( src.type() == dst.type() && src.size == dst.size );
     cv::exp( src, dst );
-}
-
-CV_IMPL void cvLog( const CvArr* srcarr, CvArr* dstarr )
-{
-    cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr);
-    CV_Assert( src.type() == dst.type() && src.size == dst.size );
-    cv::log( src, dst );
 }
 
 CV_IMPL void cvPow( const CvArr* srcarr, CvArr* dstarr, double power )
@@ -2065,16 +1929,6 @@ double cv::solvePoly( InputArray _coeffs0, OutputArray _roots0, int maxIters )
 
 
 #ifndef OPENCV_EXCLUDE_C_API
-
-CV_IMPL int
-cvSolveCubic( const CvMat* coeffs, CvMat* roots )
-{
-    cv::Mat _coeffs = cv::cvarrToMat(coeffs), _roots = cv::cvarrToMat(roots), _roots0 = _roots;
-    int nroots = cv::solveCubic(_coeffs, _roots);
-    CV_Assert( _roots.data == _roots0.data ); // check that the array of roots was not reallocated
-    return nroots;
-}
-
 
 void cvSolvePoly(const CvMat* a, CvMat *r, int maxiter, int)
 {

@@ -839,7 +839,7 @@ void normalize( const SparseMat& src, SparseMat& dst, double a, int norm_type )
     CV_INSTRUMENT_REGION();
 
     double scale = 1;
-    if( norm_type == CV_L2 || norm_type == CV_L1 || norm_type == CV_C )
+    if( norm_type == NORM_L2 || norm_type == NORM_L1 || norm_type == NORM_INF )
     {
         scale = norm( src, norm_type );
         scale = scale > DBL_EPSILON ? a/scale : 0.;

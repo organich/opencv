@@ -2,6 +2,7 @@ from __future__ import print_function
 import sys
 import argparse
 import cv2 as cv
+assert cv.__version__ < "5.0", "Caffe importer is deprecated and removed from OpenCV 5.0"
 import tensorflow as tf
 import numpy as np
 import struct
@@ -18,7 +19,7 @@ parser = argparse.ArgumentParser(description="Use this script to create TensorFl
                                              "with weights from OpenCV's face detection network. "
                                              "Only backbone part of SSD model is converted this way. "
                                              "Look for .pbtxt configuration file at "
-                                             "https://github.com/opencv/opencv_extra/tree/4.x/testdata/dnn/opencv_face_detector.pbtxt")
+                                             "https://github.com/opencv/opencv_extra/tree/5.x/testdata/dnn/opencv_face_detector.pbtxt")
 parser.add_argument('--model', help='Path to .caffemodel weights', required=True)
 parser.add_argument('--proto', help='Path to .prototxt Caffe model definition', required=True)
 parser.add_argument('--pb', help='Path to output .pb TensorFlow model', required=True)

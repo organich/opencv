@@ -207,6 +207,7 @@ OCV_OPTION(BUILD_ITT                "Build Intel ITT from source"
     (NOT MINGW OR OPENCV_FORCE_3RDPARTY_BUILD)
     IF (X86_64 OR X86 OR ARM OR AARCH64 OR PPC64 OR PPC64LE) AND NOT WINRT AND NOT APPLE_FRAMEWORK
 )
+OCV_OPTION(BUILD_CLAPACK            "Build CLapack from source"          (((WIN32 OR ANDROID) AND NOT APPLE) OR OPENCV_FORCE_3RDPARTY_BUILD) )
 
 # Optional 3rd party components
 # ===================================================
@@ -278,9 +279,6 @@ OCV_OPTION(WITH_WAYLAND "Include Wayland support" OFF
 OCV_OPTION(WITH_IPP "Include Intel IPP support" (NOT MINGW AND NOT CV_DISABLE_OPTIMIZATION)
   VISIBLE_IF (X86_64 OR X86) AND NOT WINRT AND NOT IOS AND NOT XROS
   VERIFY HAVE_IPP)
-OCV_OPTION(WITH_HALIDE "Include Halide support" OFF
-  VISIBLE_IF TRUE
-  VERIFY HAVE_HALIDE)
 OCV_OPTION(WITH_VULKAN "Include Vulkan support" OFF
   VISIBLE_IF TRUE
   VERIFY HAVE_VULKAN)
@@ -309,9 +307,6 @@ OCV_OPTION(WITH_OPENEXR "Include ILM support via OpenEXR" ((WIN32 OR ANDROID OR 
 OCV_OPTION(WITH_OPENGL "Include OpenGL support" OFF
   VISIBLE_IF NOT ANDROID AND NOT WINRT
   VERIFY HAVE_OPENGL)
-OCV_OPTION(WITH_OPENVX "Include OpenVX support" OFF
-  VISIBLE_IF TRUE
-  VERIFY HAVE_OPENVX)
 OCV_OPTION(WITH_OPENNI "Include OpenNI support" OFF
   VISIBLE_IF NOT ANDROID AND NOT IOS AND NOT XROS AND NOT WINRT
   VERIFY HAVE_OPENNI)
@@ -543,6 +538,9 @@ OCV_OPTION(ENABLE_CUDA_FIRST_CLASS_LANGUAGE "Enable CUDA as a first class langua
 
 OCV_OPTION(ENABLE_PYLINT              "Add target with Pylint checks"                            (BUILD_DOCS OR BUILD_EXAMPLES) IF (NOT CMAKE_CROSSCOMPILING AND NOT APPLE_FRAMEWORK) )
 OCV_OPTION(ENABLE_FLAKE8              "Add target with Python flake8 checker"                    (BUILD_DOCS OR BUILD_EXAMPLES) IF (NOT CMAKE_CROSSCOMPILING AND NOT APPLE_FRAMEWORK) )
+
+OCV_OPTION(WITH_UNIFONT               "Build 'uni' font (WQY MicroHei) into OpenCV"              (NOT BUILD_opencv_js)
+           VERIFY HAVE_UNIFONT)
 
 if(ENABLE_IMPL_COLLECTION)
   add_definitions(-DCV_COLLECT_IMPL_DATA)
@@ -790,6 +788,9 @@ include(cmake/OpenCVFindLibsGUI.cmake)
 include(cmake/OpenCVFindLibsVideo.cmake)
 include(cmake/OpenCVFindLibsPerf.cmake)
 include(cmake/OpenCVFindLAPACK.cmake)
+if(WITH_LAPACK)
+  ocv_assert(HAVE_LAPACK)  # Lapack is required for OpenCV 5.0+
+endif()
 include(cmake/OpenCVFindProtobuf.cmake)
 include(cmake/OpenCVDetectFlatbuffers.cmake)
 if(WITH_TIMVX)
@@ -858,11 +859,6 @@ if(WITH_OPENCL)
   include(cmake/OpenCVDetectOpenCL.cmake)
 endif()
 
-# --- Halide ---
-if(WITH_HALIDE)
-  include(cmake/OpenCVDetectHalide.cmake)
-endif()
-
 # --- VkCom ---
 if(WITH_VULKAN)
   include(cmake/OpenCVDetectVulkan.cmake)
@@ -889,10 +885,6 @@ endif()
 
 if(WITH_VTK)
   include(cmake/OpenCVDetectVTK.cmake)
-endif()
-
-if(WITH_OPENVX)
-  include(cmake/FindOpenVX.cmake)
 endif()
 
 if(WITH_QUIRC)
@@ -926,12 +918,6 @@ endmacro()
 
 if(NOT DEFINED OpenCV_HAL)
   set(OpenCV_HAL "OpenCV_HAL")
-endif()
-
-if(HAVE_OPENVX)
-  if(NOT ";${OpenCV_HAL};" MATCHES ";openvx;")
-    set(OpenCV_HAL "openvx;${OpenCV_HAL}")
-  endif()
 endif()
 
 if(WITH_KLEIDICV)
@@ -991,10 +977,6 @@ foreach(hal ${OpenCV_HAL})
     else()
       message(STATUS "HAL RVV: RVV is not available, disabling halrvv...")
     endif()
-  elseif(hal STREQUAL "openvx")
-    add_subdirectory(3rdparty/openvx)
-    ocv_hal_register(OPENVX_HAL_LIBRARIES OPENVX_HAL_HEADERS OPENVX_HAL_INCLUDE_DIRS)
-    list(APPEND OpenCV_USED_HAL "openvx (ver ${OPENVX_HAL_VERSION})")
   else()
     ocv_debug_message(STATUS "OpenCV HAL: ${hal} ...")
     ocv_clear_vars(OpenCV_HAL_LIBRARIES OpenCV_HAL_HEADERS OpenCV_HAL_INCLUDE_DIRS)
@@ -1047,7 +1029,7 @@ ocv_register_modules()
 add_subdirectory(doc)
 
 # various data that is used by cv libraries and/or demo applications.
-add_subdirectory(data)
+# add_subdirectory(data)
 
 # extra applications
 if(BUILD_opencv_apps)
@@ -1433,6 +1415,10 @@ if(WITH_VTK OR HAVE_VTK)
   status("    VTK support:" HAVE_VTK THEN "YES (ver ${VTK_VERSION})" ELSE NO)
 endif()
 
+if(WITH_UNIFONT OR HAVE_UNIFONT)
+  status("    Built-in Unicode font:" HAVE_UNIFONT THEN "YES" ELSE "NO")
+endif()
+
 # ========================== MEDIA IO ==========================
 status("")
 status("  Media I/O: ")
@@ -1716,11 +1702,7 @@ if(WITH_VA OR HAVE_VA)
 endif()
 
 if(WITH_LAPACK OR HAVE_LAPACK)
-  status("    Lapack:"      HAVE_LAPACK     THEN "YES (${LAPACK_LIBRARIES})" ELSE NO)
-endif()
-
-if(WITH_HALIDE OR HAVE_HALIDE)
-  status("    Halide:"     HAVE_HALIDE      THEN "YES (${HALIDE_LIBRARIES} ${HALIDE_INCLUDE_DIRS})" ELSE NO)
+  status("    Lapack:"      HAVE_LAPACK     THEN "YES (${LAPACK_LIBRARIES} ${LAPACK_VERSION})" ELSE NO)
 endif()
 
 if(HAVE_OPENVINO
@@ -1787,10 +1769,6 @@ endif()
 
 if(WITH_EIGEN OR HAVE_EIGEN)
   status("    Eigen:"      HAVE_EIGEN       THEN "YES (ver ${EIGEN_WORLD_VERSION}.${EIGEN_MAJOR_VERSION}.${EIGEN_MINOR_VERSION})" ELSE NO)
-endif()
-
-if(WITH_OPENVX OR HAVE_OPENVX)
-  status("    OpenVX:"     HAVE_OPENVX      THEN "YES (${OPENVX_LIBRARIES})" ELSE "NO")
 endif()
 
 status("    Custom HAL:" OpenCV_USED_HAL  THEN "YES (${OpenCV_USED_HAL})" ELSE "NO")
@@ -1883,19 +1861,6 @@ if(WITH_CANN)
 endif()
 
 # ========================== python ==========================
-if(BUILD_opencv_python2)
-  status("")
-  status("  Python 2:")
-  status("    Interpreter:"     PYTHON2INTERP_FOUND  THEN "${PYTHON2_EXECUTABLE} (ver ${PYTHON2_VERSION_STRING})"       ELSE NO)
-  if(PYTHON2LIBS_VERSION_STRING)
-    status("    Libraries:"   HAVE_opencv_python2  THEN  "${PYTHON2_LIBRARIES} (ver ${PYTHON2LIBS_VERSION_STRING})"   ELSE NO)
-  else()
-    status("    Libraries:"   HAVE_opencv_python2  THEN  "${PYTHON2_LIBRARIES}"                                      ELSE NO)
-  endif()
-  status("    numpy:"         PYTHON2_NUMPY_INCLUDE_DIRS THEN "${PYTHON2_NUMPY_INCLUDE_DIRS} (ver ${PYTHON2_NUMPY_VERSION})" ELSE "NO (Python wrappers can not be generated)")
-  status("    install path:"  HAVE_opencv_python2  THEN "${__INSTALL_PATH_PYTHON2}"                            ELSE "-")
-endif()
-
 if(BUILD_opencv_python3)
   status("")
   status("  Python 3:")

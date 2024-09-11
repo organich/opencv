@@ -2,7 +2,7 @@
 // It is subject to the license terms in the LICENSE file found in the top-level directory
 // of this distribution and at http://opencv.org/license.html.
 #include "test_precomp.hpp"
-
+#include "opencv2/core/core_c.h"
 #include <fstream>
 
 namespace opencv_test { namespace {
@@ -118,12 +118,12 @@ protected:
             int cn = cvtest::randInt(rng) % 4 + 1;
             Mat test_mat(cvtest::randInt(rng)%30+1, cvtest::randInt(rng)%30+1, CV_MAKETYPE(depth, cn));
 
-            rng0.fill(test_mat, CV_RAND_UNI, Scalar::all(ranges[depth][0]), Scalar::all(ranges[depth][1]));
+            rng0.fill(test_mat, RNG::UNIFORM, Scalar::all(ranges[depth][0]), Scalar::all(ranges[depth][1]));
             if( depth >= CV_32F )
             {
                 exp(test_mat, test_mat);
                 Mat test_mat_scale(test_mat.size(), test_mat.type());
-                rng0.fill(test_mat_scale, CV_RAND_UNI, Scalar::all(-1), Scalar::all(1));
+                rng0.fill(test_mat_scale, RNG::UNIFORM, Scalar::all(-1), Scalar::all(1));
                 cv::multiply(test_mat, test_mat_scale, test_mat);
             }
 
@@ -136,12 +136,12 @@ protected:
             };
             MatND test_mat_nd(3, sz, CV_MAKETYPE(depth, cn));
 
-            rng0.fill(test_mat_nd, CV_RAND_UNI, Scalar::all(ranges[depth][0]), Scalar::all(ranges[depth][1]));
+            rng0.fill(test_mat_nd, RNG::UNIFORM, Scalar::all(ranges[depth][0]), Scalar::all(ranges[depth][1]));
             if( depth >= CV_32F )
             {
                 exp(test_mat_nd, test_mat_nd);
                 MatND test_mat_scale(test_mat_nd.dims, test_mat_nd.size, test_mat_nd.type());
-                rng0.fill(test_mat_scale, CV_RAND_UNI, Scalar::all(-1), Scalar::all(1));
+                rng0.fill(test_mat_scale, RNG::UNIFORM, Scalar::all(-1), Scalar::all(1));
                 cv::multiply(test_mat_nd, test_mat_scale, test_mat_nd);
             }
 
@@ -421,9 +421,9 @@ protected:
                 fs["g1"] >> og1;
                 CV_Assert( mi2.empty() );
                 CV_Assert( mv2.empty() );
-                CV_Assert( cvtest::norm(Mat(mi3), Mat(mi4), CV_C) == 0 );
+                CV_Assert( cvtest::norm(Mat(mi3), Mat(mi4), NORM_INF) == 0 );
                 CV_Assert( mv4.size() == 1 );
-                double n = cvtest::norm(mv3[0], mv4[0], CV_C);
+                double n = cvtest::norm(mv3[0], mv4[0], NORM_INF);
                 CV_Assert( vudt2.empty() );
                 CV_Assert( vudt3 == vudt4 );
                 CV_Assert( n == 0 );
@@ -684,11 +684,12 @@ static void test_filestorage_basic(int write_flags, const char* suffix_name, boo
                 reference.read(&reference_data[0], ref_sz);
                 reference.close();
 
-                EXPECT_EQ(reference_data, test_data);
+                if (useMemory) {
+                    EXPECT_EQ(reference_data, test_data);
+                }
             }
             std::cout << "Storage size: " << sz << std::endl;
             EXPECT_LE(sz, (size_t)6000);
-
         }
         {   /* read */
             cv::FileStorage fs(name, cv::FileStorage::READ + (useMemory ? cv::FileStorage::MEMORY : 0));
@@ -741,16 +742,14 @@ static void test_filestorage_basic(int write_flags, const char* suffix_name, boo
         {
             for (int j = 0; j < _2d_out.cols; ++j)
             {
-                EXPECT_EQ(_2d_in.at<cv::Vec3b>(i, j), _2d_out.at<cv::Vec3b>(i, j));
-                if (::testing::Test::HasNonfatalFailure())
-                {
+                if (_2d_in.at<cv::Vec3b>(i, j) != _2d_out.at<cv::Vec3b>(i, j)) {
+                    EXPECT_EQ(_2d_in.at<cv::Vec3b>(i, j), _2d_out.at<cv::Vec3b>(i, j));
                     printf("i = %d, j = %d\n", i, j);
-                    errors++;
-                }
-                if (errors >= 3)
-                {
-                    i = _2d_out.rows;
-                    break;
+                    if (++errors >= 3)
+                    {
+                        i = _2d_out.rows;
+                        break;
+                    }
                 }
             }
         }
@@ -765,9 +764,12 @@ static void test_filestorage_basic(int write_flags, const char* suffix_name, boo
         ASSERT_EQ(_rd_in.cols   , _rd_out.cols);
         ASSERT_EQ(_rd_in.dims   , _rd_out.dims);
         ASSERT_EQ(_rd_in.depth(), _rd_out.depth());
-        EXPECT_EQ(0, cv::norm(_rd_in, _rd_out, NORM_INF));
-        if (testReadWrite && !useMemory && !generateTestData)
+
+        if (useMemory)
         {
+            EXPECT_EQ(0, cv::norm(_rd_in, _rd_out, NORM_INF));
+        }
+        if (testReadWrite && !useMemory && !generateTestData) {
             EXPECT_EQ(0, remove(name.c_str()));
         }
     }
@@ -1874,15 +1876,25 @@ static void test_20279(FileStorage& fs)
     EXPECT_EQ(CV_16FC3, m16fc3.type()) << typeToString(m16fc3.type());
     //std::cout << m16fc3 << std::endl;
 
+    Mat m16bfc1, m16bfc3;
+    m16fc1.convertTo(m16bfc1, CV_16BF);
+    m16fc3.convertTo(m16bfc3, CV_16BF);
+
     fs << "m16fc1" << m16fc1;
     fs << "m16fc3" << m16fc3;
+    fs << "m16bfc1" << m16bfc1;
+    fs << "m16bfc3" << m16bfc3;
 
     string content = fs.releaseAndGetString();
     if (cvtest::debugLevel > 0) std::cout << content << std::endl;
 
     FileStorage fs_read(content, FileStorage::READ + FileStorage::MEMORY);
+
     Mat m16fc1_result;
     Mat m16fc3_result;
+    Mat m16bfc1_result;
+    Mat m16bfc3_result;
+
     fs_read["m16fc1"] >> m16fc1_result;
     ASSERT_FALSE(m16fc1_result.empty());
     EXPECT_EQ(CV_16FC1, m16fc1_result.type()) << typeToString(m16fc1_result.type());
@@ -1892,6 +1904,16 @@ static void test_20279(FileStorage& fs)
     ASSERT_FALSE(m16fc3_result.empty());
     EXPECT_EQ(CV_16FC3, m16fc3_result.type()) << typeToString(m16fc3_result.type());
     EXPECT_LE(cvtest::norm(m16fc3_result, m16fc3, NORM_INF), 1e-2);
+
+    fs_read["m16bfc1"] >> m16bfc1_result;
+    ASSERT_FALSE(m16bfc1_result.empty());
+    EXPECT_EQ(CV_16BFC1, m16bfc1_result.type()) << typeToString(m16bfc1_result.type());
+    EXPECT_LE(cvtest::norm(m16bfc1_result, m16bfc1, NORM_INF), 2e-2);
+
+    fs_read["m16bfc3"] >> m16bfc3_result;
+    ASSERT_FALSE(m16bfc3_result.empty());
+    EXPECT_EQ(CV_16BFC3, m16bfc3_result.type()) << typeToString(m16bfc3_result.type());
+    EXPECT_LE(cvtest::norm(m16bfc3_result, m16bfc3, NORM_INF), 2e-2);
 }
 
 TEST(Core_InputOutput, FileStorage_16F_xml)

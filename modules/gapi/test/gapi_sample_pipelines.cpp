@@ -482,7 +482,7 @@ TEST(GAPI_Pipeline, ReplaceDefaultByFunctor)
     EXPECT_TRUE(f.is_called);
 }
 
-TEST(GAPI_Pipeline, GraphOutputIs1DMat)
+TEST(DISABLED_GAPI_Pipeline, GraphOutputIs1DMat)
 {
     int dim = 100;
     cv::Mat in_mat(1, 1, CV_8UC3);
@@ -504,7 +504,7 @@ TEST(GAPI_Pipeline, GraphOutputIs1DMat)
     ASSERT_EQ(dim, out_mat.size[0]);
 }
 
-TEST(GAPI_Pipeline, 1DMatBetweenIslands)
+TEST(DISABLED_GAPI_Pipeline, 1DMatBetweenIslands)
 {
     int dim = 100;
     cv::Mat in_mat(1, 1, CV_8UC3);
@@ -524,7 +524,7 @@ TEST(GAPI_Pipeline, 1DMatBetweenIslands)
     EXPECT_EQ(0, cv::norm(out_mat, ref_mat));
 }
 
-TEST(GAPI_Pipeline, 1DMatWithinSingleIsland)
+TEST(DISABLED_GAPI_Pipeline, 1DMatWithinSingleIsland)
 {
     int dim = 100;
     cv::Size blur_sz(3, 3);

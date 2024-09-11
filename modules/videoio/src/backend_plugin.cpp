@@ -145,6 +145,7 @@ protected:
 
     bool checkCompatibility(const OpenCV_API_Header& api_header, unsigned int abi_version, unsigned int api_version, bool checkMinorOpenCVVersion)
     {
+#if 0  // FIXIT: OpenCV 5.0
         if (api_header.opencv_version_major != CV_VERSION_MAJOR)
         {
             CV_LOG_ERROR(NULL, "Video I/O: wrong OpenCV major version used by plugin '" << api_header.api_description << "': " <<
@@ -161,6 +162,9 @@ protected:
                 cv::format("%d.%d, OpenCV version is '" CV_VERSION "'", api_header.opencv_version_major, api_header.opencv_version_minor))
             return false;
         }
+#else
+        CV_UNUSED(checkMinorOpenCVVersion);
+#endif
         CV_LOG_INFO(NULL, "Video I/O: initialized '" << api_header.api_description << "': built with "
             << cv::format("OpenCV %d.%d (ABI/API = %d/%d)",
                  api_header.opencv_version_major, api_header.opencv_version_minor,
@@ -531,6 +535,12 @@ public:
         cv::_OutputArray* dst = static_cast<cv::_OutputArray*>(userdata);
         if (!dst)
             return CV_ERROR_FAIL;
+        int depth = CV_MAT_DEPTH(type);
+        // [TODO] Remove this condition after rebuilding plugins or add a new
+        // version of plugins. Convert type from the old one to the new one (5 bits)
+        if (depth > 7) {
+            type = CV_MAKETYPE((type & 7), (type >> 3) + 1);
+        }
         cv::Mat(cv::Size(width, height), type, (void*)data, step).copyTo(*dst);
         return CV_ERROR_OK;
     }

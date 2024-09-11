@@ -182,16 +182,16 @@ public:
     {
         switch (property_id)
         {
-            case CV_CAP_PROP_FRAME_WIDTH:
+            case CAP_PROP_FRAME_WIDTH:
                 return (( videoOrientationAuto &&
                          (cv::ROTATE_90_CLOCKWISE == videoRotationCode || cv::ROTATE_90_COUNTERCLOCKWISE == videoRotationCode))
                         ? videoHeight : videoWidth);
-            case CV_CAP_PROP_FRAME_HEIGHT:
+            case CAP_PROP_FRAME_HEIGHT:
                 return (( videoOrientationAuto &&
                          (cv::ROTATE_90_CLOCKWISE == videoRotationCode || cv::ROTATE_90_COUNTERCLOCKWISE == videoRotationCode))
                         ? videoWidth : videoHeight);
-            case CV_CAP_PROP_FPS: return videoFrameRate;
-            case CV_CAP_PROP_FRAME_COUNT: return videoFrameCount;
+            case CAP_PROP_FPS: return videoFrameRate;
+            case CAP_PROP_FRAME_COUNT: return videoFrameCount;
             case CAP_PROP_ORIENTATION_META: return videoRotation;
             case CAP_PROP_ORIENTATION_AUTO: return videoOrientationAuto ? 1 : 0;
         }
@@ -501,7 +501,7 @@ public:
         } else {
             if (AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM == buffer.format) {
                 Mat bufferMat(image.rows, image.cols, CV_8UC4, buffer.bits, buffer.stride * 4);
-                cvtColor(image, bufferMat, CV_BGR2RGBA);
+                cvtColor(image, bufferMat, COLOR_BGR2RGBA);
             } else {
                 LOGE("Unknow surface buffer format: %u", buffer.format);
             }
@@ -513,7 +513,7 @@ public:
 
         //OpenCV don't support RGB to NV12 so we need to connvert to YV12 and then manually changed it to NV12
         Mat imageYV12;
-        cvtColor(image, imageYV12, CV_BGR2YUV_YV12);
+        cvtColor(image, imageYV12, COLOR_BGR2YUV_YV12);
 
         //convert from YV12 to NV12
         size_t yPlaneSize = width * height;
@@ -661,7 +661,7 @@ const AndroidMediaNdkVideoWriter::FourCCInfo AndroidMediaNdkVideoWriter::FOURCC_
     { CV_FOURCC('H', '2', '6', '5'), "video/hevc", AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4 },
     { CV_FOURCC('H', '2', '6', '3'), "video/3gpp", AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4 },
     { CV_FOURCC('M', 'P', '4', 'V'), "video/mp4v-es", AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4 },
-    { 0, NULL },
+    { 0, NULL, AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4 },
 };
 
 

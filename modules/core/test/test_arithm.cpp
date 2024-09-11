@@ -3,6 +3,8 @@
 // of this distribution and at http://opencv.org/license.html.
 #include "test_precomp.hpp"
 #include "ref_reduce_arg.impl.hpp"
+#include "opencv2/core/core_c.h"
+
 #include <algorithm>
 
 namespace opencv_test { namespace {
@@ -45,7 +47,11 @@ struct BaseElemWiseOp
                                   ninputs > 1 ? ARITHM_MAX_CHANNELS : 4);
     }
 
-    virtual double getMaxErr(int depth) { return depth < CV_32F ? 1 : depth == CV_32F ? 1e-5 : 1e-12; }
+    virtual double getMaxErr(int depth)
+    {
+        return depth < CV_32F || depth == CV_32U || depth == CV_64U || depth == CV_64S ? 1 :
+               depth == CV_16F || depth == CV_16BF ? 1e-2 : depth == CV_32F ? 1e-5 : 1e-12;
+    }
     virtual void generateScalars(int depth, RNG& rng)
     {
         const double m = 3.;
@@ -98,11 +104,36 @@ struct BaseElemWiseOp
     int context;
 };
 
+static const _OutputArray::DepthMask baseArithmTypeMask =
+    _OutputArray::DepthMask(
+        _OutputArray::DEPTH_MASK_8U |
+        _OutputArray::DEPTH_MASK_16U |
+        _OutputArray::DEPTH_MASK_16S |
+        _OutputArray::DEPTH_MASK_32S |
+        _OutputArray::DEPTH_MASK_32F |
+        _OutputArray::DEPTH_MASK_64F |
+        _OutputArray::DEPTH_MASK_16F |
+        _OutputArray::DEPTH_MASK_16BF |
+        _OutputArray::DEPTH_MASK_32U |
+        _OutputArray::DEPTH_MASK_64U |
+        _OutputArray::DEPTH_MASK_64S );
 
-struct BaseAddOp : public BaseElemWiseOp
+struct BaseArithmOp : public BaseElemWiseOp
+{
+    BaseArithmOp(int _ninputs, int _flags, double _alpha, double _beta, Scalar _gamma=Scalar::all(0))
+    : BaseElemWiseOp(_ninputs, _flags, _alpha, _beta, _gamma) {}
+
+    int getRandomType(RNG& rng)
+    {
+        return cvtest::randomType(rng, baseArithmTypeMask, 1,
+                                  ninputs > 1 ? ARITHM_MAX_CHANNELS : 4);
+    }
+};
+
+struct BaseAddOp : public BaseArithmOp
 {
     BaseAddOp(int _ninputs, int _flags, double _alpha, double _beta, Scalar _gamma=Scalar::all(0))
-    : BaseElemWiseOp(_ninputs, _flags, _alpha, _beta, _gamma) {}
+    : BaseArithmOp(_ninputs, _flags, _alpha, _beta, _gamma) {}
 
     void refop(const vector<Mat>& src, Mat& dst, const Mat& mask)
     {
@@ -115,6 +146,11 @@ struct BaseAddOp : public BaseElemWiseOp
         }
         else
             cvtest::add(src[0], alpha, src.size() > 1 ? src[1] : Mat(), beta, gamma, dst, dstType);
+    }
+
+    double getMaxErr(int depth)
+    {
+        return depth == CV_16BF ? 1e-2 : depth == CV_16F ? 1e-3 : depth == CV_32F ? 1e-4 : depth == CV_64F ? 1e-12 : 2;
     }
 };
 
@@ -172,7 +208,7 @@ struct ScaleAddOp : public BaseAddOp
     }
     double getMaxErr(int depth)
     {
-        return depth < CV_32F ? 1 : depth == CV_32F ? 3e-5 : 1e-12;
+        return depth == CV_16BF ? 1e-2 : depth == CV_16F ? 1e-3 : depth == CV_32F ? 3e-5 : depth == CV_64F ? 1e-12 : 2;
     }
 };
 
@@ -187,9 +223,9 @@ struct AddWeightedOp : public BaseAddOp
     }
 };
 
-struct MulOp : public BaseElemWiseOp
+struct MulOp : public BaseArithmOp
 {
-    MulOp() : BaseElemWiseOp(2, FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
+    MulOp() : BaseArithmOp(2, FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
     void getValueRange(int depth, double& minval, double& maxval)
     {
         minval = depth < CV_32S ? cvtest::getMinVal(depth) : depth == CV_32S ? -1000000 : -1000.;
@@ -209,9 +245,9 @@ struct MulOp : public BaseElemWiseOp
     }
 };
 
-struct MulSOp : public BaseElemWiseOp
+struct MulSOp : public BaseArithmOp
 {
-    MulSOp() : BaseElemWiseOp(1, FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
+    MulSOp() : BaseArithmOp(1, FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
     void getValueRange(int depth, double& minval, double& maxval)
     {
         minval = depth < CV_32S ? cvtest::getMinVal(depth) : depth == CV_32S ? -1000000 : -1000.;
@@ -231,9 +267,9 @@ struct MulSOp : public BaseElemWiseOp
     }
 };
 
-struct DivOp : public BaseElemWiseOp
+struct DivOp : public BaseArithmOp
 {
-    DivOp() : BaseElemWiseOp(2, FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
+    DivOp() : BaseArithmOp(2, FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
     void op(const vector<Mat>& src, Mat& dst, const Mat&)
     {
         int dtype = (flags & MIXED_TYPE) ? dst.type() : -1;
@@ -253,9 +289,9 @@ struct DivOp : public BaseElemWiseOp
     }
 };
 
-struct RecipOp : public BaseElemWiseOp
+struct RecipOp : public BaseArithmOp
 {
-    RecipOp() : BaseElemWiseOp(1, FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
+    RecipOp() : BaseArithmOp(1, FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
     void op(const vector<Mat>& src, Mat& dst, const Mat&)
     {
         int dtype = (flags & MIXED_TYPE) ? dst.type() : -1;
@@ -364,9 +400,9 @@ struct LogicSOp : public BaseElemWiseOp
     char opcode;
 };
 
-struct MinOp : public BaseElemWiseOp
+struct MinOp : public BaseArithmOp
 {
-    MinOp() : BaseElemWiseOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
+    MinOp() : BaseArithmOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
     void op(const vector<Mat>& src, Mat& dst, const Mat&)
     {
         cv::min(src[0], src[1], dst);
@@ -381,9 +417,9 @@ struct MinOp : public BaseElemWiseOp
     }
 };
 
-struct MaxOp : public BaseElemWiseOp
+struct MaxOp : public BaseArithmOp
 {
-    MaxOp() : BaseElemWiseOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
+    MaxOp() : BaseArithmOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
     void op(const vector<Mat>& src, Mat& dst, const Mat&)
     {
         cv::max(src[0], src[1], dst);
@@ -398,9 +434,9 @@ struct MaxOp : public BaseElemWiseOp
     }
 };
 
-struct MinSOp : public BaseElemWiseOp
+struct MinSOp : public BaseArithmOp
 {
-    MinSOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+REAL_GAMMA, 1, 1, Scalar::all(0)) {}
+    MinSOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+REAL_GAMMA, 1, 1, Scalar::all(0)) {}
     void op(const vector<Mat>& src, Mat& dst, const Mat&)
     {
         cv::min(src[0], gamma[0], dst);
@@ -415,9 +451,9 @@ struct MinSOp : public BaseElemWiseOp
     }
 };
 
-struct MaxSOp : public BaseElemWiseOp
+struct MaxSOp : public BaseArithmOp
 {
-    MaxSOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+REAL_GAMMA, 1, 1, Scalar::all(0)) {}
+    MaxSOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+REAL_GAMMA, 1, 1, Scalar::all(0)) {}
     void op(const vector<Mat>& src, Mat& dst, const Mat&)
     {
         cv::max(src[0], gamma[0], dst);
@@ -432,9 +468,9 @@ struct MaxSOp : public BaseElemWiseOp
     }
 };
 
-struct CmpOp : public BaseElemWiseOp
+struct CmpOp : public BaseArithmOp
 {
-    CmpOp() : BaseElemWiseOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) { cmpop = 0; }
+    CmpOp() : BaseArithmOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) { cmpop = 0; }
     void generateScalars(int depth, RNG& rng)
     {
         BaseElemWiseOp::generateScalars(depth, rng);
@@ -450,7 +486,7 @@ struct CmpOp : public BaseElemWiseOp
     }
     int getRandomType(RNG& rng)
     {
-        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL_BUT_8S, 1, 1);
+        return cvtest::randomType(rng, baseArithmTypeMask, 1, 1);
     }
 
     double getMaxErr(int)
@@ -460,14 +496,14 @@ struct CmpOp : public BaseElemWiseOp
     int cmpop;
 };
 
-struct CmpSOp : public BaseElemWiseOp
+struct CmpSOp : public BaseArithmOp
 {
-    CmpSOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+REAL_GAMMA, 1, 1, Scalar::all(0)) { cmpop = 0; }
+    CmpSOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+REAL_GAMMA, 1, 1, Scalar::all(0)) { cmpop = 0; }
     void generateScalars(int depth, RNG& rng)
     {
         BaseElemWiseOp::generateScalars(depth, rng);
         cmpop = rng.uniform(0, 6);
-        if( depth < CV_32F )
+        if( depth != CV_16F && depth != CV_16BF && depth != CV_32F && depth != CV_64F )
             gamma[0] = cvRound(gamma[0]);
     }
     void op(const vector<Mat>& src, Mat& dst, const Mat&)
@@ -480,7 +516,7 @@ struct CmpSOp : public BaseElemWiseOp
     }
     int getRandomType(RNG& rng)
     {
-        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL_BUT_8S, 1, 1);
+        return cvtest::randomType(rng, baseArithmTypeMask, 1, 1);
     }
     double getMaxErr(int)
     {
@@ -503,7 +539,7 @@ struct CopyOp : public BaseElemWiseOp
     }
     int getRandomType(RNG& rng)
     {
-        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL_16F, 1, ARITHM_MAX_CHANNELS);
+        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL, 1, ARITHM_MAX_CHANNELS);
     }
     double getMaxErr(int)
     {
@@ -525,7 +561,7 @@ struct SetOp : public BaseElemWiseOp
     }
     int getRandomType(RNG& rng)
     {
-        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL_16F, 1, ARITHM_MAX_CHANNELS);
+        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL, 1, ARITHM_MAX_CHANNELS);
     }
     double getMaxErr(int)
     {
@@ -533,27 +569,29 @@ struct SetOp : public BaseElemWiseOp
     }
 };
 
-template<typename _Tp, typename _WTp> static void
+template<typename _Tp, typename _WTp=_Tp> static void
 inRangeS_(const _Tp* src, const _WTp* a, const _WTp* b, uchar* dst, size_t total, int cn)
 {
     size_t i;
     int c;
     for( i = 0; i < total; i++ )
     {
-        _Tp val = src[i*cn];
+        _WTp val = (_WTp)src[i*cn];
         dst[i] = (a[0] <= val && val <= b[0]) ? uchar(255) : 0;
     }
     for( c = 1; c < cn; c++ )
     {
         for( i = 0; i < total; i++ )
         {
-            _Tp val = src[i*cn + c];
+            _WTp val = (_WTp)src[i*cn + c];
             dst[i] = a[c] <= val && val <= b[c] ? dst[i] : 0;
         }
     }
 }
 
-template<typename _Tp> static void inRange_(const _Tp* src, const _Tp* a, const _Tp* b, uchar* dst, size_t total, int cn)
+template<typename _Tp, typename _WTp=_Tp> static void
+inRange_(const _Tp* src, const _Tp* a, const _Tp* b,
+         uchar* dst, size_t total, int cn)
 {
     size_t i;
     int c;
@@ -608,14 +646,31 @@ static void inRange(const Mat& src, const Mat& lb, const Mat& rb, Mat& dst)
         case CV_16S:
             inRange_((const short*)sptr, (const short*)aptr, (const short*)bptr, dptr, total, cn);
             break;
+        case CV_32U:
+            inRange_((const unsigned*)sptr, (const unsigned*)aptr, (const unsigned*)bptr, dptr, total, cn);
+            break;
         case CV_32S:
             inRange_((const int*)sptr, (const int*)aptr, (const int*)bptr, dptr, total, cn);
+            break;
+        case CV_64U:
+            inRange_((const uint64*)sptr, (const uint64*)aptr, (const uint64*)bptr, dptr, total, cn);
+            break;
+        case CV_64S:
+            inRange_((const int64*)sptr, (const int64*)aptr, (const int64*)bptr, dptr, total, cn);
             break;
         case CV_32F:
             inRange_((const float*)sptr, (const float*)aptr, (const float*)bptr, dptr, total, cn);
             break;
         case CV_64F:
             inRange_((const double*)sptr, (const double*)aptr, (const double*)bptr, dptr, total, cn);
+            break;
+        case CV_16F:
+            inRange_<cv::hfloat, float>((const cv::hfloat*)sptr, (const cv::hfloat*)aptr,
+                                           (const cv::hfloat*)bptr, dptr, total, cn);
+            break;
+        case CV_16BF:
+            inRange_<cv::bfloat, float>((const cv::bfloat*)sptr, (const cv::bfloat*)aptr,
+                                            (const cv::bfloat*)bptr, dptr, total, cn);
             break;
         default:
             CV_Error(cv::Error::StsUnsupportedFormat, "");
@@ -633,8 +688,9 @@ static void inRangeS(const Mat& src, const Scalar& lb, const Scalar& rb, Mat& ds
     size_t total = planes[0].total();
     size_t i, nplanes = it.nplanes;
     int depth = src.depth(), cn = src.channels();
-    union { double d[4]; float f[4]; int i[4];} lbuf, rbuf;
-    int wtype = CV_MAKETYPE(depth <= CV_32S ? CV_32S : depth, cn);
+    union { double d[4]; float f[4]; int i[4]; unsigned u[4]; int64 L[4]; uint64 UL[4]; } lbuf, rbuf;
+    int wtype = CV_MAKETYPE((depth <= CV_32S ? CV_32S :
+        depth == CV_16F || depth == CV_16BF || depth == CV_32F ? CV_32F : depth), cn);
     scalarToRawData(lb, lbuf.d, wtype, cn);
     scalarToRawData(rb, rbuf.d, wtype, cn);
 
@@ -657,14 +713,29 @@ static void inRangeS(const Mat& src, const Scalar& lb, const Scalar& rb, Mat& ds
         case CV_16S:
             inRangeS_((const short*)sptr, lbuf.i, rbuf.i, dptr, total, cn);
             break;
+        case CV_32U:
+            inRangeS_((const unsigned*)sptr, lbuf.u, rbuf.u, dptr, total, cn);
+            break;
         case CV_32S:
             inRangeS_((const int*)sptr, lbuf.i, rbuf.i, dptr, total, cn);
+            break;
+        case CV_64U:
+            inRangeS_((const uint64*)sptr, lbuf.UL, rbuf.UL, dptr, total, cn);
+            break;
+        case CV_64S:
+            inRangeS_((const int64*)sptr, lbuf.L, rbuf.L, dptr, total, cn);
             break;
         case CV_32F:
             inRangeS_((const float*)sptr, lbuf.f, rbuf.f, dptr, total, cn);
             break;
         case CV_64F:
             inRangeS_((const double*)sptr, lbuf.d, rbuf.d, dptr, total, cn);
+            break;
+        case CV_16F:
+            inRangeS_((const cv::hfloat*)sptr, lbuf.f, rbuf.f, dptr, total, cn);
+            break;
+        case CV_16BF:
+            inRangeS_((const cv::bfloat*)sptr, lbuf.f, rbuf.f, dptr, total, cn);
             break;
         default:
             CV_Error(cv::Error::StsUnsupportedFormat, "");
@@ -675,9 +746,9 @@ static void inRangeS(const Mat& src, const Scalar& lb, const Scalar& rb, Mat& ds
 } // namespace
 CVTEST_GUARD_SYMBOL(inRange)
 
-struct InRangeSOp : public BaseElemWiseOp
+struct InRangeSOp : public BaseArithmOp
 {
-    InRangeSOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA, 1, 1, Scalar::all(0)) {}
+    InRangeSOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA, 1, 1, Scalar::all(0)) {}
     void op(const vector<Mat>& src, Mat& dst, const Mat&)
     {
         cv::inRange(src[0], gamma, gamma1, dst);
@@ -705,9 +776,9 @@ struct InRangeSOp : public BaseElemWiseOp
 };
 
 
-struct InRangeOp : public BaseElemWiseOp
+struct InRangeOp : public BaseArithmOp
 {
-    InRangeOp() : BaseElemWiseOp(3, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
+    InRangeOp() : BaseArithmOp(3, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
     void op(const vector<Mat>& src, Mat& dst, const Mat&)
     {
         Mat lb, rb;
@@ -723,6 +794,88 @@ struct InRangeOp : public BaseElemWiseOp
         cvtest::max(src[1], src[2], rb);
 
         reference::inRange(src[0], lb, rb, dst);
+    }
+    double getMaxErr(int)
+    {
+        return 0;
+    }
+};
+
+namespace reference {
+
+template<typename _Tp>
+struct SoftType;
+
+template<>
+struct SoftType<float>
+{
+    typedef softfloat type;
+};
+
+template<>
+struct SoftType<double>
+{
+    typedef softdouble type;
+};
+
+
+template <typename _Tp>
+static void finiteMask_(const _Tp *src, uchar *dst, size_t total, int cn)
+{
+    for(size_t i = 0; i < total; i++ )
+    {
+        bool good = true;
+        for (int c = 0; c < cn; c++)
+        {
+            _Tp val = src[i * cn + c];
+            typename SoftType<_Tp>::type sval(val);
+
+            good = good && !sval.isNaN() && !sval.isInf();
+        }
+        dst[i] = good ? 255 : 0;
+    }
+}
+
+static void finiteMask(const Mat& src, Mat& dst)
+{
+    dst.create(src.dims, &src.size[0], CV_8UC1);
+
+    const Mat *arrays[]={&src, &dst, 0};
+    Mat planes[2];
+    NAryMatIterator it(arrays, planes);
+    size_t total = planes[0].total();
+    size_t i, nplanes = it.nplanes;
+    int depth = src.depth(), cn = src.channels();
+
+    for( i = 0; i < nplanes; i++, ++it )
+    {
+        const uchar* sptr = planes[0].ptr();
+        uchar* dptr = planes[1].ptr();
+
+        switch( depth )
+        {
+        case CV_32F: finiteMask_<float >((const  float*)sptr, dptr, total, cn); break;
+        case CV_64F: finiteMask_<double>((const double*)sptr, dptr, total, cn); break;
+        }
+    }
+}
+}
+
+
+struct FiniteMaskOp : public BaseElemWiseOp
+{
+    FiniteMaskOp() : BaseElemWiseOp(1, 0, 1, 1, Scalar::all(0)) {}
+    void op(const vector<Mat>& src, Mat& dst, const Mat&)
+    {
+        cv::finiteMask(src[0], dst);
+    }
+    void refop(const vector<Mat>& src, Mat& dst, const Mat&)
+    {
+        reference::finiteMask(src[0], dst);
+    }
+    int getRandomType(RNG& rng)
+    {
+        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_FLT, 1, 4);
     }
     double getMaxErr(int)
     {
@@ -750,7 +903,7 @@ struct ConvertScaleOp : public BaseElemWiseOp
     }
     double getMaxErr(int)
     {
-        return ddepth <= CV_32S ? 2 : ddepth < CV_64F ? 1e-3 : 1e-12;
+        return ddepth <= CV_32S || ddepth == CV_32U || ddepth == CV_64U || ddepth == CV_64S ? 2 : ddepth == CV_64F ? 1e-12 : ddepth == CV_Bool ? 0 : ddepth == CV_16BF ? 1e-2 : 2e-3;
     }
     void generateScalars(int depth, RNG& rng)
     {
@@ -859,8 +1012,8 @@ namespace reference {
 // does not support inplace operation
 static void flip(const Mat& src, Mat& dst, int flipcode)
 {
-    CV_Assert(src.dims == 2);
-    dst.create(src.size(), src.type());
+    CV_Assert(src.dims <= 2);
+    dst.createSameSize(src, src.type());
     int i, j, k, esz = (int)src.elemSize(), width = src.cols*esz;
 
     for( i = 0; i < dst.rows; i++ )
@@ -1090,9 +1243,9 @@ static void log(const Mat& src, Mat& dst)
 
 } // namespace
 
-struct ExpOp : public BaseElemWiseOp
+struct ExpOp : public BaseArithmOp
 {
-    ExpOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
+    ExpOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
     int getRandomType(RNG& rng)
     {
         return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_FLT, 1, ARITHM_MAX_CHANNELS);
@@ -1117,9 +1270,9 @@ struct ExpOp : public BaseElemWiseOp
 };
 
 
-struct LogOp : public BaseElemWiseOp
+struct LogOp : public BaseArithmOp
 {
-    LogOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
+    LogOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)) {}
     int getRandomType(RNG& rng)
     {
         return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_FLT, 1, ARITHM_MAX_CHANNELS);
@@ -1201,9 +1354,9 @@ static void cartToPolar(const Mat& mx, const Mat& my, Mat& mmag, Mat& mangle, bo
 
 } // namespace
 
-struct CartToPolarToCartOp : public BaseElemWiseOp
+struct CartToPolarToCartOp : public BaseArithmOp
 {
-    CartToPolarToCartOp() : BaseElemWiseOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0))
+    CartToPolarToCartOp() : BaseArithmOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0))
     {
         context = 3;
         angleInDegrees = true;
@@ -1245,9 +1398,9 @@ struct CartToPolarToCartOp : public BaseElemWiseOp
 };
 
 
-struct MeanOp : public BaseElemWiseOp
+struct MeanOp : public BaseArithmOp
 {
-    MeanOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SUPPORT_MASK+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
+    MeanOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SUPPORT_MASK+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
     {
         context = 3;
     }
@@ -1268,9 +1421,9 @@ struct MeanOp : public BaseElemWiseOp
 };
 
 
-struct SumOp : public BaseElemWiseOp
+struct SumOp : public BaseArithmOp
 {
-    SumOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
+    SumOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
     {
         context = 3;
     }
@@ -1284,20 +1437,20 @@ struct SumOp : public BaseElemWiseOp
         dst.create(1, 1, CV_64FC4);
         dst.at<Scalar>(0,0) = cvtest::mean(src[0])*(double)src[0].total();
     }
-    double getMaxErr(int)
+    double getMaxErr(int depth)
     {
-        return 1e-5;
+        return depth == CV_16F || depth == CV_16BF ? 1e-3 : 1e-5;
     }
 };
 
 
-struct CountNonZeroOp : public BaseElemWiseOp
+struct CountNonZeroOp : public BaseArithmOp
 {
-    CountNonZeroOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SCALAR_OUTPUT+SUPPORT_MASK, 1, 1, Scalar::all(0))
+    CountNonZeroOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SCALAR_OUTPUT+SUPPORT_MASK, 1, 1, Scalar::all(0))
     {}
     int getRandomType(RNG& rng)
     {
-        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL, 1, 1);
+        return cvtest::randomType(rng, baseArithmTypeMask, 1, 1);
     }
     void op(const vector<Mat>& src, Mat& dst, const Mat& mask)
     {
@@ -1324,12 +1477,12 @@ struct CountNonZeroOp : public BaseElemWiseOp
 };
 
 
-struct MeanStdDevOp : public BaseElemWiseOp
+struct MeanStdDevOp : public BaseArithmOp
 {
     Scalar sqmeanRef;
     int cn;
 
-    MeanStdDevOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SUPPORT_MASK+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
+    MeanStdDevOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SUPPORT_MASK+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
     {
         cn = 0;
         context = 7;
@@ -1368,16 +1521,16 @@ struct MeanStdDevOp : public BaseElemWiseOp
 };
 
 
-struct NormOp : public BaseElemWiseOp
+struct NormOp : public BaseArithmOp
 {
-    NormOp() : BaseElemWiseOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SUPPORT_MASK+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
+    NormOp() : BaseArithmOp(2, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SUPPORT_MASK+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
     {
         context = 1;
         normType = 0;
     }
     int getRandomType(RNG& rng)
     {
-        int type = cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL_BUT_8S, 1, 4);
+        int type = cvtest::randomType(rng, baseArithmTypeMask, 1, 4);
         for(;;)
         {
             normType = rng.uniform(1, 8);
@@ -1407,23 +1560,24 @@ struct NormOp : public BaseElemWiseOp
     void generateScalars(int, RNG& /*rng*/)
     {
     }
-    double getMaxErr(int)
+    double getMaxErr(int depth)
     {
-        return 1e-6;
+        return normType == NORM_INF && depth <= CV_32S ? 0 :
+            depth == CV_16F || depth == CV_16BF ? 1e-5 : 1e-6;
     }
     int normType;
 };
 
 
-struct MinMaxLocOp : public BaseElemWiseOp
+struct MinMaxLocOp : public BaseArithmOp
 {
-    MinMaxLocOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SUPPORT_MASK+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
+    MinMaxLocOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA+SUPPORT_MASK+SCALAR_OUTPUT, 1, 1, Scalar::all(0))
     {
         context = ARITHM_MAX_NDIMS*2 + 2;
     }
     int getRandomType(RNG& rng)
     {
-        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL_BUT_8S, 1, 1);
+        return cvtest::randomType(rng, baseArithmTypeMask, 1, 1);
     }
     void saveOutput(const vector<int>& minidx, const vector<int>& maxidx,
                     double minval, double maxval, Mat& dst)
@@ -1461,16 +1615,16 @@ struct MinMaxLocOp : public BaseElemWiseOp
     }
 };
 
-struct reduceArgMinMaxOp : public BaseElemWiseOp
+struct reduceArgMinMaxOp : public BaseArithmOp
 {
-    reduceArgMinMaxOp() : BaseElemWiseOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)),
+    reduceArgMinMaxOp() : BaseArithmOp(1, FIX_ALPHA+FIX_BETA+FIX_GAMMA, 1, 1, Scalar::all(0)),
                           isLast(false), isMax(false), axis(0)
     {
         context = ARITHM_MAX_NDIMS*2 + 2;
     }
     int getRandomType(RNG& rng) override
     {
-        return cvtest::randomType(rng, _OutputArray::DEPTH_MASK_ALL_BUT_8S, 1, 1);
+        return cvtest::randomType(rng, baseArithmTypeMask, 1, 1);
     }
     void getRandomSize(RNG& rng, vector<int>& size) override
     {
@@ -1570,10 +1724,15 @@ TEST_P(ElemWiseTest, accuracy)
         }
         op->generateScalars(depth, rng);
 
+        /*printf("testIdx=%d, depth=%d, channels=%d, have_mask=%d\n", testIdx, depth, src[0].channels(), (int)haveMask);
+        if (testIdx == 22)
+            printf(">>>\n");*/
+
         op->refop(src, dst0, mask);
         op->op(src, dst, mask);
 
         double maxErr = op->getMaxErr(depth);
+
         ASSERT_PRED_FORMAT2(cvtest::MatComparator(maxErr, op->context), dst0, dst) << "\nsrc[0] ~ " <<
             cvtest::MatInfo(!src.empty() ? src[0] : Mat()) << "\ntestCase #" << testIdx << "\n";
     }
@@ -1620,6 +1779,8 @@ INSTANTIATE_TEST_CASE_P(Core_CmpS, ElemWiseTest, ::testing::Values(ElemWiseOpPtr
 
 INSTANTIATE_TEST_CASE_P(Core_InRangeS, ElemWiseTest, ::testing::Values(ElemWiseOpPtr(new InRangeSOp)));
 INSTANTIATE_TEST_CASE_P(Core_InRange, ElemWiseTest, ::testing::Values(ElemWiseOpPtr(new InRangeOp)));
+
+INSTANTIATE_TEST_CASE_P(Core_FiniteMask, ElemWiseTest, ::testing::Values(ElemWiseOpPtr(new FiniteMaskOp)));
 
 INSTANTIATE_TEST_CASE_P(Core_Flip, ElemWiseTest, ::testing::Values(ElemWiseOpPtr(new FlipOp)));
 INSTANTIATE_TEST_CASE_P(Core_Rotate, ElemWiseTest, ::testing::Values(ElemWiseOpPtr(new RotateOp)));
@@ -1754,82 +1915,82 @@ INSTANTIATE_TEST_CASE_P(Core_RecipMixed, ArithmMixedTest,
 
 TEST(Core_ArithmMask, uninitialized)
 {
-            RNG& rng = theRNG();
-            const int MAX_DIM=3;
-            int sizes[MAX_DIM];
-            for( int iter = 0; iter < 100; iter++ )
-            {
-                int dims = rng.uniform(1, MAX_DIM+1);
-                int depth = rng.uniform(CV_8U, CV_64F+1);
-                int cn = rng.uniform(1, 6);
-                int type = CV_MAKETYPE(depth, cn);
-                int op = rng.uniform(0, depth < CV_32F ? 5 : 2); // don't run binary operations between floating-point values
-                int depth1 = op <= 1 ? CV_64F : depth;
-                for (int k = 0; k < MAX_DIM; k++)
-                {
-                    sizes[k] = k < dims ? rng.uniform(1, 30) : 0;
-                }
-                SCOPED_TRACE(cv::format("iter=%d dims=%d depth=%d cn=%d type=%d op=%d depth1=%d dims=[%d; %d; %d]",
-                                         iter,   dims,   depth,   cn,   type,   op,   depth1, sizes[0], sizes[1], sizes[2]));
+    RNG& rng = theRNG();
+    const int MAX_DIM=3;
+    int sizes[MAX_DIM];
+    for( int iter = 0; iter < 100; iter++ )
+    {
+        int dims = rng.uniform(1, MAX_DIM+1);
+        int depth = rng.uniform(CV_8U, CV_64F+1);
+        int cn = rng.uniform(1, 6);
+        int type = CV_MAKETYPE(depth, cn);
+        int op = rng.uniform(0, depth < CV_32F ? 5 : 2); // don't run binary operations between floating-point values
+        int depth1 = op <= 1 ? CV_64F : depth;
+        for (int k = 0; k < MAX_DIM; k++)
+        {
+            sizes[k] = k < dims ? rng.uniform(1, 30) : 0;
+        }
+        SCOPED_TRACE(cv::format("iter=%d dims=%d depth=%d cn=%d type=%d op=%d depth1=%d dims=[%d; %d; %d]",
+                                 iter,   dims,   depth,   cn,   type,   op,   depth1, sizes[0], sizes[1], sizes[2]));
 
-                Mat a(dims, sizes, type), a1;
-                Mat b(dims, sizes, type), b1;
-                Mat mask(dims, sizes, CV_8U);
-                Mat mask1;
-                Mat c, d;
+        Mat a(dims, sizes, type), a1;
+        Mat b(dims, sizes, type), b1;
+        Mat mask(dims, sizes, CV_8U);
+        Mat mask1;
+        Mat c, d;
 
-                rng.fill(a, RNG::UNIFORM, 0, 100);
-                rng.fill(b, RNG::UNIFORM, 0, 100);
+        rng.fill(a, RNG::UNIFORM, 0, 100);
+        rng.fill(b, RNG::UNIFORM, 0, 100);
 
-                // [-2,2) range means that the each generated random number
-                // will be one of -2, -1, 0, 1. Saturated to [0,255], it will become
-                // 0, 0, 0, 1 => the mask will be filled by ~25%.
-                rng.fill(mask, RNG::UNIFORM, -2, 2);
+        // [-2,2) range means that the each generated random number
+        // will be one of -2, -1, 0, 1. Saturated to [0,255], it will become
+        // 0, 0, 0, 1 => the mask will be filled by ~25%.
+        rng.fill(mask, RNG::UNIFORM, -2, 2);
 
-                a.convertTo(a1, depth1);
-                b.convertTo(b1, depth1);
-                // invert the mask
-                cv::compare(mask, 0, mask1, CMP_EQ);
-                a1.setTo(0, mask1);
-                b1.setTo(0, mask1);
+        a.convertTo(a1, depth1);
+        b.convertTo(b1, depth1);
+        // invert the mask
+        cv::compare(mask, 0, mask1, CMP_EQ);
+        a1.setTo(0, mask1);
+        b1.setTo(0, mask1);
 
-                if( op == 0 )
-                {
-                    cv::add(a, b, c, mask);
-                    cv::add(a1, b1, d);
-                }
-                else if( op == 1 )
-                {
-                    cv::subtract(a, b, c, mask);
-                    cv::subtract(a1, b1, d);
-                }
-                else if( op == 2 )
-                {
-                    cv::bitwise_and(a, b, c, mask);
-                    cv::bitwise_and(a1, b1, d);
-                }
-                else if( op == 3 )
-                {
-                    cv::bitwise_or(a, b, c, mask);
-                    cv::bitwise_or(a1, b1, d);
-                }
-                else if( op == 4 )
-                {
-                    cv::bitwise_xor(a, b, c, mask);
-                    cv::bitwise_xor(a1, b1, d);
-                }
-                Mat d1;
-                d.convertTo(d1, depth);
-                EXPECT_LE(cvtest::norm(c, d1, CV_C), DBL_EPSILON);
-            }
+        if( op == 0 )
+        {
+            cv::add(a, b, c, mask);
+            cv::add(a1, b1, d);
+        }
+        else if( op == 1 )
+        {
+            cv::subtract(a, b, c, mask);
+            cv::subtract(a1, b1, d);
+        }
+        else if( op == 2 )
+        {
+            cv::bitwise_and(a, b, c, mask);
+            cv::bitwise_and(a1, b1, d);
+        }
+        else if( op == 3 )
+        {
+            cv::bitwise_or(a, b, c, mask);
+            cv::bitwise_or(a1, b1, d);
+        }
+        else if( op == 4 )
+        {
+            cv::bitwise_xor(a, b, c, mask);
+            cv::bitwise_xor(a1, b1, d);
+        }
+        Mat d1;
+        d.convertTo(d1, depth);
+        EXPECT_LE(cvtest::norm(c, d1, NORM_INF), DBL_EPSILON);
+    }
 
-            Mat_<uchar> tmpSrc(100,100);
-            tmpSrc = 124;
-            Mat_<uchar> tmpMask(100,100);
-            tmpMask = 255;
-            Mat_<uchar> tmpDst(100,100);
-            tmpDst = 2;
-            tmpSrc.copyTo(tmpDst,tmpMask);
+    Mat_<uchar> tmpSrc(100,100);
+    tmpSrc = 124;
+    Mat_<uchar> tmpMask(100,100);
+    tmpMask = 255;
+    Mat_<uchar> tmpDst(100,100);
+    tmpDst = 2;
+    tmpSrc.copyTo(tmpDst,tmpMask);
 }
 
 TEST(Multiply, FloatingPointRounding)
@@ -1848,8 +2009,10 @@ TEST(Core_Add, AddToColumnWhen3Rows)
     m1.col(1) += 10;
 
     cv::Mat m2 = (cv::Mat_<double>(3, 2) << 1, 12, 3, 14, 5, 16);
+    cv::MatExpr diff = m1 - m2;
+    int nz = countNonZero(diff);
 
-    ASSERT_EQ(0, countNonZero(m1 - m2));
+    ASSERT_EQ(0, nz);
 }
 
 TEST(Core_Add, AddToColumnWhen4Rows)
@@ -2143,6 +2306,31 @@ TEST(Core_FindNonZero, regression)
     findNonZero(img, pts);
     ASSERT_TRUE(pts.size() == nz);
 
+    img.convertTo( img, CV_32U );
+    pts.resize(pts.size()*3);
+    findNonZero(img, pts);
+    ASSERT_TRUE(pts.size() == nz);
+
+    img.convertTo( img, CV_64U );
+    pts.resize(pts.size()*2);
+    findNonZero(img, pts);
+    ASSERT_TRUE(pts.size() == nz);
+
+    img.convertTo( img, CV_64S );
+    pts.resize(pts.size()*5);
+    findNonZero(img, pts);
+    ASSERT_TRUE(pts.size() == nz);
+
+    img.convertTo( img, CV_16F );
+    pts.resize(pts.size()*3);
+    findNonZero(img, pts);
+    ASSERT_TRUE(pts.size() == nz);
+
+    img.convertTo( img, CV_16BF );
+    pts.resize(pts.size()*4);
+    findNonZero(img, pts);
+    ASSERT_TRUE(pts.size() == nz);
+
     img.convertTo( img, CV_32F );
     pts.resize(pts.size()*5);
     findNonZero(img, pts);
@@ -2283,26 +2471,25 @@ TEST(Compare, regression_16F_do_not_crash)
     cv::Mat mat1(2, 2, CV_16F, cv::Scalar(1));
     cv::Mat mat2(2, 2, CV_16F, cv::Scalar(2));
     cv::Mat dst;
-    EXPECT_THROW(cv::compare(mat1, mat2, dst, cv::CMP_EQ), cv::Exception);
+    EXPECT_NO_THROW(cv::compare(mat1, mat2, dst, cv::CMP_EQ));
 }
-
 
 TEST(Core_minMaxIdx, regression_9207_1)
 {
     const int rows = 4;
     const int cols = 3;
     uchar mask_[rows*cols] = {
- 255, 255, 255,
- 255,   0, 255,
-   0, 255, 255,
-   0,   0, 255
-};
+        255, 255, 255,
+        255,   0, 255,
+        0, 255, 255,
+        0,   0, 255
+    };
     uchar src_[rows*cols] = {
-   1,   1,   1,
-   1,   1,   1,
-   2,   1,   1,
-   2,   2,   1
-};
+        1,   1,   1,
+        1,   1,   1,
+        2,   1,   1,
+        2,   2,   1
+    };
     Mat mask(Size(cols, rows), CV_8UC1, mask_);
     Mat src(Size(cols, rows), CV_8UC1, src_);
     double minVal = -0.0, maxVal = -0.0;
@@ -2313,7 +2500,6 @@ TEST(Core_minMaxIdx, regression_9207_1)
     EXPECT_EQ(0, maxIdx[0]);
     EXPECT_EQ(0, maxIdx[1]);
 }
-
 
 class TransposeND : public testing::TestWithParam< tuple<std::vector<int>, perf::MatType> >
 {
@@ -2592,35 +2778,35 @@ TEST(Core_minMaxIdx, regression_9207_2)
     const int rows = 13;
     const int cols = 15;
     uchar mask_[rows*cols] = {
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 255,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 255,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 255,
-   0, 255, 255, 255, 255,   0,   0,   0,   0,   0,   0,   0,   0,   0, 255,
- 255,   0,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0,   0,   0, 255,
- 255,   0,   0,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0, 255, 255,
- 255,   0,   0,   0,   0,   0,   0, 255, 255,   0,   0, 255, 255, 255,   0,
- 255,   0,   0,   0,   0,   0,   0,   0,   0, 255, 255, 255,   0, 255,   0,
- 255,   0,   0,   0,   0,   0,   0, 255, 255,   0,   0,   0, 255, 255,   0,
- 255,   0,   0,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0, 255,   0,
- 255,   0,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0, 255,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-   0, 255, 255, 255, 255,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
-};
+       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 255,
+       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 255,
+       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, 255,
+       0, 255, 255, 255, 255,   0,   0,   0,   0,   0,   0,   0,   0,   0, 255,
+     255,   0,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0,   0,   0, 255,
+     255,   0,   0,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0, 255, 255,
+     255,   0,   0,   0,   0,   0,   0, 255, 255,   0,   0, 255, 255, 255,   0,
+     255,   0,   0,   0,   0,   0,   0,   0,   0, 255, 255, 255,   0, 255,   0,
+     255,   0,   0,   0,   0,   0,   0, 255, 255,   0,   0,   0, 255, 255,   0,
+     255,   0,   0,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0, 255,   0,
+     255,   0,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+       0, 255,   0,   0,   0, 255,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+       0, 255, 255, 255, 255,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
+    };
     uchar src_[15*13] = {
-   5,   5,   5,   5,   5,   6,   5,   2,   0,   4,   6,   6,   4,   1,   0,
-   6,   5,   4,   4,   5,   6,   6,   5,   2,   0,   4,   6,   5,   2,   0,
-   3,   2,   1,   1,   2,   4,   6,   6,   4,   2,   3,   4,   4,   2,   0,
-   1,   0,   0,   0,   0,   1,   4,   5,   4,   4,   4,   4,   3,   2,   0,
-   0,   0,   0,   0,   0,   0,   2,   3,   4,   4,   4,   3,   2,   1,   0,
-   0,   0,   0,   0,   0,   0,   0,   2,   3,   4,   3,   2,   1,   0,   0,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   1,   1,   0,   0,   0,   1,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   1,
-   0,   0,   0,   0,   0,   0,   0,   0,   0,   1,   1,   1,   0,   0,   1,
-   0,   0,   0,   0,   0,   0,   0,   1,   2,   4,   3,   3,   1,   0,   1,
-   0,   0,   0,   0,   0,   0,   1,   4,   5,   6,   5,   4,   3,   2,   0,
-   1,   0,   0,   0,   0,   0,   3,   5,   5,   4,   3,   4,   4,   3,   0,
-   2,   0,   0,   0,   0,   2,   5,   6,   5,   2,   2,   5,   4,   3,   0
-};
+       5,   5,   5,   5,   5,   6,   5,   2,   0,   4,   6,   6,   4,   1,   0,
+       6,   5,   4,   4,   5,   6,   6,   5,   2,   0,   4,   6,   5,   2,   0,
+       3,   2,   1,   1,   2,   4,   6,   6,   4,   2,   3,   4,   4,   2,   0,
+       1,   0,   0,   0,   0,   1,   4,   5,   4,   4,   4,   4,   3,   2,   0,
+       0,   0,   0,   0,   0,   0,   2,   3,   4,   4,   4,   3,   2,   1,   0,
+       0,   0,   0,   0,   0,   0,   0,   2,   3,   4,   3,   2,   1,   0,   0,
+       0,   0,   0,   0,   0,   0,   0,   0,   0,   1,   1,   0,   0,   0,   1,
+       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   1,
+       0,   0,   0,   0,   0,   0,   0,   0,   0,   1,   1,   1,   0,   0,   1,
+       0,   0,   0,   0,   0,   0,   0,   1,   2,   4,   3,   3,   1,   0,   1,
+       0,   0,   0,   0,   0,   0,   1,   4,   5,   6,   5,   4,   3,   2,   0,
+       1,   0,   0,   0,   0,   0,   3,   5,   5,   4,   3,   4,   4,   3,   0,
+       2,   0,   0,   0,   0,   2,   5,   6,   5,   2,   2,   5,   4,   3,   0
+    };
     Mat mask(Size(cols, rows), CV_8UC1, mask_);
     Mat src(Size(cols, rows), CV_8UC1, src_);
     double minVal = -0.0, maxVal = -0.0;
@@ -2710,11 +2896,11 @@ TEST(Core_Norm, IPP_regression_NORM_L1_16UC3_small)
     Mat a(sz, CV_MAKE_TYPE(CV_16U, cn), Scalar::all(1));
     Mat b(sz, CV_MAKE_TYPE(CV_16U, cn), Scalar::all(2));
     uchar mask_[9*4] = {
- 255, 255, 255,   0, 255, 255,   0, 255,   0,
-   0, 255,   0,   0, 255, 255, 255, 255,   0,
-   0,   0,   0, 255,   0, 255,   0, 255, 255,
-   0,   0, 255,   0, 255, 255, 255,   0, 255
-};
+        255, 255, 255,   0, 255, 255,   0, 255,   0,
+        0, 255,   0,   0, 255, 255, 255, 255,   0,
+        0,   0,   0, 255,   0, 255,   0, 255, 255,
+        0,   0, 255,   0, 255, 255, 255,   0, 255
+    };
     Mat mask(sz, CV_8UC1, mask_);
 
     EXPECT_EQ((double)9*4*cn, cv::norm(a, b, NORM_L1)); // without mask, IPP works well
@@ -3208,9 +3394,132 @@ INSTANTIATE_TEST_CASE_P(Core_CartPolar, Core_PolarToCart_inplace,
     )
 );
 
-CV_ENUM(LutMatType, CV_8U, CV_16U, CV_16F, CV_32S, CV_32F, CV_64F)
+// Check different values for finiteMask()
 
-struct Core_LUT: public testing::TestWithParam<LutMatType>
+template<typename _Tp>
+_Tp randomNan(RNG& rng);
+
+template<>
+float randomNan(RNG& rng)
+{
+    uint32_t r = rng.next();
+    Cv32suf v;
+    v.u = r;
+    // exp & set a bit to avoid zero mantissa
+    v.u = v.u | 0x7f800001;
+    return v.f;
+}
+
+template<>
+double randomNan(RNG& rng)
+{
+    uint32_t r0 = rng.next();
+    uint32_t r1 = rng.next();
+    Cv64suf v;
+    v.u = (uint64_t(r0) << 32) | uint64_t(r1);
+    // exp &set a bit to avoid zero mantissa
+    v.u = v.u | 0x7ff0000000000001;
+    return v.f;
+}
+
+template<typename T>
+Mat generateFiniteMaskData(int cn, RNG& rng)
+{
+    typedef typename reference::SoftType<T>::type SFT;
+
+    SFT pinf = SFT::inf();
+    SFT ninf = SFT::inf().setSign(true);
+
+    const int len = 100;
+    Mat_<T> plainData(1, cn*len);
+    for(int i = 0; i < cn*len; i++)
+    {
+        int r = rng.uniform(0, 3);
+        plainData(i) = r == 0 ? T(rng.uniform(0, 2) ? pinf : ninf) :
+                       r == 1 ? randomNan<T>(rng) : T(0);
+    }
+
+    return Mat(plainData).reshape(cn);
+}
+
+typedef std::tuple<int, int> FiniteMaskFixtureParams;
+class FiniteMaskFixture : public ::testing::TestWithParam<FiniteMaskFixtureParams> {};
+
+TEST_P(FiniteMaskFixture, flags)
+{
+    auto p = GetParam();
+    int depth = get<0>(p);
+    int channels = get<1>(p);
+
+    RNG rng((uint64)ARITHM_RNG_SEED);
+    Mat data = (depth == CV_32F) ? generateFiniteMaskData<float >(channels, rng)
+                  /* CV_64F */   : generateFiniteMaskData<double>(channels, rng);
+
+    Mat nans, gtNans;
+    cv::finiteMask(data, nans);
+    reference::finiteMask(data, gtNans);
+
+    EXPECT_MAT_NEAR(nans, gtNans, 0);
+}
+
+// Params are: depth, channels 1 to 4
+INSTANTIATE_TEST_CASE_P(Core_FiniteMask, FiniteMaskFixture, ::testing::Combine(::testing::Values(CV_32F, CV_64F), ::testing::Range(1, 5)));
+
+
+///////////////////////////////////////////////////////////////////////////////////
+typedef testing::TestWithParam<perf::MatDepth> NonZeroSupportedMatDepth;
+
+TEST_P(NonZeroSupportedMatDepth, findNonZero)
+{
+    cv::Mat src = cv::Mat::zeros(16,16, CV_MAKETYPE(GetParam(), 1));
+    vector<Point> pts;
+    EXPECT_NO_THROW(findNonZero(src, pts));
+}
+
+TEST_P(NonZeroSupportedMatDepth, countNonZero)
+{
+    cv::Mat src = cv::Mat::zeros(16,16, CV_MAKETYPE(GetParam(), 1));
+    EXPECT_NO_THROW(countNonZero(src));
+}
+
+TEST_P(NonZeroSupportedMatDepth, hasNonZero)
+{
+    cv::Mat src = cv::Mat::zeros(16,16, CV_MAKETYPE(GetParam(), 1));
+    EXPECT_NO_THROW(hasNonZero(src));
+}
+
+INSTANTIATE_TEST_CASE_P(
+    NonZero,
+    NonZeroSupportedMatDepth,
+    testing::Values(CV_16BF, CV_Bool, CV_64U, CV_64S, CV_32U)
+);
+
+///////////////////////////////////////////////////////////////////////////////////
+typedef testing::TestWithParam<perf::MatDepth> MinMaxSupportedMatDepth;
+
+TEST_P(MinMaxSupportedMatDepth, minMaxLoc)
+{
+    cv::Mat src = cv::Mat::zeros(16,16, CV_MAKETYPE(GetParam(), 1));
+    double minV=0.0, maxV=0.0;
+    Point minLoc, maxLoc;
+    EXPECT_NO_THROW(cv::minMaxLoc(src, &minV, &maxV, &minLoc, &maxLoc));
+}
+
+TEST_P(MinMaxSupportedMatDepth, minMaxIdx)
+{
+    cv::Mat src = cv::Mat::zeros(16,16, CV_MAKETYPE(GetParam(), 1));
+    double minV=0.0, maxV=0.0;
+    int minIdx=0, maxIdx=0;
+    EXPECT_NO_THROW(cv::minMaxIdx(src, &minV, &maxV, &minIdx, &maxIdx));
+}
+
+INSTANTIATE_TEST_CASE_P(
+    MinMaxLoc,
+    MinMaxSupportedMatDepth,
+    testing::Values(perf::MatDepth(CV_16F), CV_16BF, CV_Bool, CV_64U, CV_64S, CV_32U)
+);
+
+struct Core_LUT: public testing::TestWithParam<perf::MatDepth>
 {
     template<typename T, int ch>
     cv::Mat referenceWithType(cv::Mat input, cv::Mat table)
@@ -3241,21 +3550,25 @@ struct Core_LUT: public testing::TestWithParam<LutMatType>
     template<int ch = 1>
     cv::Mat reference(cv::Mat input, cv::Mat table)
     {
-        if (table.type() == CV_8U)
+        if ((table.type() == CV_8U) || (table.type() == CV_8S) || (table.type() == CV_Bool))
         {
             return referenceWithType<uchar, ch>(input, table);
         }
-        else if (table.type() == CV_16U)
+        else if ((table.type() == CV_16U) || (table.type() == CV_16S))
         {
             return referenceWithType<ushort, ch>(input, table);
         }
-        else if (table.type() == CV_16F)
+        else if ((table.type() == CV_16F) || (table.type() == CV_16BF))
         {
             return referenceWithType<ushort, ch>(input, table);
         }
-        else if (table.type() == CV_32S)
+        else if ((table.type() == CV_32S) || (table.type() == CV_32U))
         {
-            return referenceWithType<int, ch>(input, table);
+            return referenceWithType<uint, ch>(input, table);
+        }
+        else if ((table.type() == CV_64S) || (table.type() == CV_64U))
+        {
+            return referenceWithType<uint64_t, ch>(input, table);
         }
         else if (table.type() == CV_32F)
         {
@@ -3284,6 +3597,13 @@ TEST_P(Core_LUT, accuracy)
 
     cv::Mat gt = reference(input, table);
 
+    // Force convert to 8U as CV_Bool is not supported in cv::norm for now
+    // TODO: Remove conversion after cv::norm fix
+    if (type == CV_Bool)
+    {
+        output.convertTo(output, CV_8U);
+        gt.convertTo(gt, CV_8U);
+    }
     ASSERT_EQ(0, cv::norm(output, gt, cv::NORM_INF));
 }
 
@@ -3301,10 +3621,180 @@ TEST_P(Core_LUT, accuracy_multi)
 
     cv::Mat gt = reference<3>(input, table);
 
+    // Force convert to 8U as CV_Bool is not supported in cv::norm for now
+    // TODO: Remove conversion after cv::norm fix
+    if (type == CV_Bool)
+    {
+        output.convertTo(output, CV_8U);
+        gt.convertTo(gt, CV_8U);
+    }
+
     ASSERT_EQ(0, cv::norm(output, gt, cv::NORM_INF));
 }
 
+INSTANTIATE_TEST_CASE_P(/**/, Core_LUT, perf::MatDepth::all());
 
-INSTANTIATE_TEST_CASE_P(/**/, Core_LUT, LutMatType::all());
+CV_ENUM(MaskType, CV_8U, CV_8S, CV_Bool)
+typedef testing::TestWithParam<MaskType> Core_MaskTypeTest;
+
+TEST_P(Core_MaskTypeTest, BasicArithm)
+{
+    int mask_type = GetParam();
+    RNG& rng = theRNG();
+    const int MAX_DIM=3;
+    int sizes[MAX_DIM];
+    for( int iter = 0; iter < 100; iter++ )
+    {
+        int dims = rng.uniform(1, MAX_DIM+1);
+        int depth = rng.uniform(CV_8U, CV_64F+1);
+        int cn = rng.uniform(1, 6);
+        int type = CV_MAKETYPE(depth, cn);
+        int op = rng.uniform(0, depth < CV_32F ? 5 : 2); // don't run binary operations between floating-point values
+        int depth1 = op <= 1 ? CV_64F : depth;
+        for (int k = 0; k < MAX_DIM; k++)
+        {
+            sizes[k] = k < dims ? rng.uniform(1, 30) : 0;
+        }
+
+        Mat a(dims, sizes, type), a1;
+        Mat b(dims, sizes, type), b1;
+        Mat mask(dims, sizes, mask_type);
+        Mat mask1;
+        Mat c, d;
+
+        rng.fill(a, RNG::UNIFORM, 0, 100);
+        rng.fill(b, RNG::UNIFORM, 0, 100);
+
+        // [-2,2) range means that the each generated random number
+        // will be one of -2, -1, 0, 1. Saturated to [0,255], it will become
+        // 0, 0, 0, 1 => the mask will be filled by ~25%.
+        rng.fill(mask, RNG::UNIFORM, -2, 2);
+
+        a.convertTo(a1, depth1);
+        b.convertTo(b1, depth1);
+        // invert the mask
+        cv::compare(mask, 0, mask1, CMP_EQ);
+        a1.setTo(0, mask1);
+        b1.setTo(0, mask1);
+
+        if( op == 0 )
+        {
+            cv::add(a, b, c, mask);
+            cv::add(a1, b1, d);
+        }
+        else if( op == 1 )
+        {
+            cv::subtract(a, b, c, mask);
+            cv::subtract(a1, b1, d);
+        }
+        else if( op == 2 )
+        {
+            cv::bitwise_and(a, b, c, mask);
+            cv::bitwise_and(a1, b1, d);
+        }
+        else if( op == 3 )
+        {
+            cv::bitwise_or(a, b, c, mask);
+            cv::bitwise_or(a1, b1, d);
+        }
+        else if( op == 4 )
+        {
+            cv::bitwise_xor(a, b, c, mask);
+            cv::bitwise_xor(a1, b1, d);
+        }
+        Mat d1;
+        d.convertTo(d1, depth);
+        EXPECT_LE(cvtest::norm(c, d1, NORM_INF), DBL_EPSILON);
+    }
+}
+
+TEST_P(Core_MaskTypeTest, MinMaxIdx)
+{
+    int mask_type = GetParam();
+    const int rows = 4;
+    const int cols = 3;
+    uchar mask_[rows*cols] = {
+        255, 255, 1,
+        255,   0, 255,
+        0, 1, 255,
+        0,   0, 255
+    };
+    uchar src_[rows*cols] = {
+        1,   1,   1,
+        1,   1,   1,
+        2,   1,   1,
+        2,   2,   1
+    };
+    Mat mask(Size(cols, rows), mask_type, mask_);
+    Mat src(Size(cols, rows), CV_8UC1, src_);
+    double minVal = -0.0, maxVal = -0.0;
+    int minIdx[2] = { -2, -2 }, maxIdx[2] = { -2, -2 };
+    cv::minMaxIdx(src, &minVal, &maxVal, minIdx, maxIdx, mask);
+    EXPECT_EQ(0, minIdx[0]);
+    EXPECT_EQ(0, minIdx[1]);
+    EXPECT_EQ(0, maxIdx[0]);
+    EXPECT_EQ(0, maxIdx[1]);
+}
+
+TEST_P(Core_MaskTypeTest, Norm)
+{
+    int mask_type = GetParam();
+    int cn = 3;
+    Size sz(9, 4);  // width < 16
+    Mat a(sz, CV_MAKE_TYPE(CV_16U, cn), Scalar::all(1));
+    Mat b(sz, CV_MAKE_TYPE(CV_16U, cn), Scalar::all(2));
+    uchar mask_[9*4] = {
+        255, 255, 255,   0, 1, 255,   0, 255,   0,
+        0, 255,   0,   0, 255, 255, 255, 255,   0,
+        0,   0,   0, 255,   0, 1,   0, 255, 255,
+        0,   0, 255,   0, 255, 255, 1,   0, 255
+    };
+    Mat mask(sz, mask_type, mask_);
+
+    EXPECT_EQ((double)9*4*cn, cv::norm(a, b, NORM_L1)); // without mask, IPP works well
+    EXPECT_EQ((double)20*cn, cv::norm(a, b, NORM_L1, mask));
+}
+
+TEST_P(Core_MaskTypeTest, Mean)
+{
+    int mask_type = GetParam();
+    Size sz(9, 4);
+    Mat a(sz, CV_16UC1, Scalar::all(1));
+    uchar mask_[9*4] = {
+        255, 255, 255,   0, 1, 255,   0, 255,   0,
+        0, 255,   0,   0, 255, 255, 255, 255,   0,
+        0,   0,   0, 1,   0, 255,   0, 1, 255,
+        0,   0, 255,   0, 255, 255, 255,   0, 255
+    };
+    Mat mask(sz, mask_type, mask_);
+    a.setTo(2, mask);
+
+    Scalar result = cv::mean(a, mask);
+    EXPECT_NEAR(result[0], 2, 1e-6);
+}
+
+TEST_P(Core_MaskTypeTest, MeanStdDev)
+{
+    int mask_type = GetParam();
+    Size sz(9, 4);
+    Mat a(sz, CV_16UC1, Scalar::all(1));
+    uchar mask_[9*4] = {
+        255, 255, 255,   0, 1, 255,   0, 255,   0,
+        0, 255,   0,   0, 255, 255, 255, 255,   0,
+        0,   0,   0, 1,   0, 255,   0, 1, 255,
+        0,   0, 255,   0, 255, 255, 255,   0, 255
+    };
+    Mat mask(sz, mask_type, mask_);
+    a.setTo(2, mask);
+
+    Scalar m, stddev;
+    cv::meanStdDev(a, m, stddev, mask);
+
+    EXPECT_NEAR(m[0], 2, 1e-6);
+    EXPECT_NEAR(stddev[0], 0, 1e-6);
+}
+
+INSTANTIATE_TEST_CASE_P(/**/, Core_MaskTypeTest, MaskType::all());
+
 
 }} // namespace

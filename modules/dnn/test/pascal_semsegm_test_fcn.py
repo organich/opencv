@@ -235,7 +235,7 @@ if __name__ == "__main__":
     parser.add_argument("--val_names", help="path to file with validation set image names, download it here: "
                         "https://github.com/shelhamer/fcn.berkeleyvision.org/blob/master/data/pascal/seg11valid.txt")
     parser.add_argument("--prototxt", help="path to caffe prototxt, download it here: "
-                        "https://github.com/opencv/opencv/blob/4.x/samples/data/dnn/fcn8s-heavy-pascal.prototxt")
+                        "https://github.com/opencv/opencv/blob/5.x/samples/data/dnn/fcn8s-heavy-pascal.prototxt")
     parser.add_argument("--caffemodel", help="path to caffemodel file, download it here: "
                                              "http://dl.caffe.berkeleyvision.org/fcn8s-heavy-pascal.caffemodel")
     parser.add_argument("--onnxmodel", help="path to onnx model file, download it here: "

@@ -55,9 +55,9 @@ CV__DNN_INLINE_NS_BEGIN
 
   Classes listed here, in fact, provides C++ API for creating instances of built-in layers.
   In addition to this way of layers instantiation, there is a more common factory API (see @ref dnnLayerFactory), it allows to create layers dynamically (by name) and register new ones.
-  You can use both API, but factory API is less convenient for native C++ programming and basically designed for use inside importers (see @ref readNetFromCaffe(), @ref readNetFromTorch(), @ref readNetFromTensorflow()).
+  You can use both API, but factory API is less convenient for native C++ programming and basically designed for use inside importers (see @ref readNetFromCaffe(), @ref readNetFromTensorflow()).
 
-  Built-in layers partially reproduce functionality of corresponding Caffe and Torch7 layers.
+  Built-in layers partially reproduce functionality of corresponding ONNX, TensorFlow and Caffe layers.
   In particular, the following layers and Caffe importer were tested to reproduce <a href="http://caffe.berkeleyvision.org/tutorial/layers.html">Caffe</a> functionality:
   - Convolution
   - Deconvolution
@@ -272,6 +272,23 @@ CV__DNN_INLINE_NS_BEGIN
     {
     public:
         static Ptr<EinsumLayer> create(const LayerParams& params);
+    };
+
+    class CV_EXPORTS HardmaxLayer : public Layer
+    {
+    public:
+        static Ptr<HardmaxLayer> create(const LayerParams& params);
+    };
+
+    /** @brief GatherND layer
+     *
+     * GatherND takes two inputs data and indices of rank r >= 1 and q >= 1 respectively,
+     * and an optional attribute batch_dims. It gathers slices from data into an output tensor.
+     */
+    class CV_EXPORTS GatherNDLayer : public Layer
+    {
+    public:
+        static Ptr<GatherNDLayer> create(const LayerParams& params);
     };
 
     class CV_EXPORTS BaseConvolutionLayer : public Layer
@@ -723,7 +740,7 @@ CV__DNN_INLINE_NS_BEGIN
         static Ptr<SqrtLayer> create(const LayerParams &params);
     };
 
-    class CV_EXPORTS NotLayer : public ActivationLayer
+    class CV_EXPORTS NotLayer : public Layer
     {
     public:
         static Ptr<NotLayer> create(const LayerParams &params);
@@ -1186,6 +1203,11 @@ CV__DNN_INLINE_NS_BEGIN
     class CV_EXPORTS GroupNormLayer : public Layer {
     public:
         static Ptr<GroupNormLayer> create(const LayerParams &params);
+    };
+
+    class CV_EXPORTS CastLayer : public Layer {
+    public:
+        static Ptr<CastLayer> create(const LayerParams &params);
     };
 
     class CV_EXPORTS DepthToSpaceLayer : public Layer {

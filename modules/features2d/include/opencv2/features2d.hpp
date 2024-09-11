@@ -131,11 +131,7 @@ public:
 
 /** @brief Abstract base class for 2D image feature detectors and descriptor extractors
 */
-#ifdef __EMSCRIPTEN__
 class CV_EXPORTS_W Feature2D : public Algorithm
-#else
-class CV_EXPORTS_W Feature2D : public virtual Algorithm
-#endif
 {
 public:
     virtual ~Feature2D();
@@ -217,9 +213,6 @@ public:
 
     // see corresponding cv::Algorithm method
     CV_WRAP inline void write(FileStorage& fs, const String& name) const { Algorithm::write(fs, name); }
-#if CV_VERSION_MAJOR < 5
-    inline void write(const Ptr<FileStorage>& fs, const String& name) const { CV_Assert(fs); Algorithm::write(*fs, name); }
-#endif
 };
 
 /** Feature detectors in OpenCV have wrappers with a common interface that enables you to easily switch
@@ -489,6 +482,10 @@ public:
     CV_WRAP virtual String getDefaultName() const CV_OVERRIDE;
 };
 
+/** @example samples/python/snippets/mser.py
+An example using Maximally stable extremal region(MSER) extractor in python
+*/
+
 /** @brief Maximally stable extremal region extractor
 
 The class encapsulates all the parameters of the %MSER extraction algorithm (see [wiki
@@ -568,7 +565,9 @@ public:
 };
 
 
-/** @brief Wrapping class for feature detection using the FAST method. :
+/** @brief Wrapping class for feature detection using the FAST method.
+
+Check @ref tutorial_py_fast "the corresponding tutorial" for more details.
  */
 class CV_EXPORTS_W FastFeatureDetector : public Feature2D
 {
@@ -598,30 +597,23 @@ public:
     CV_WRAP virtual String getDefaultName() const CV_OVERRIDE;
 };
 
-/** @overload */
-CV_EXPORTS void FAST( InputArray image, CV_OUT std::vector<KeyPoint>& keypoints,
-                      int threshold, bool nonmaxSuppression=true );
-
 /** @brief Detects corners using the FAST algorithm
 
 @param image grayscale image where keypoints (corners) are detected.
 @param keypoints keypoints detected on the image.
 @param threshold threshold on difference between intensity of the central pixel and pixels of a
 circle around this pixel.
-@param nonmaxSuppression if true, non-maximum suppression is applied to detected corners
-(keypoints).
+@param nonmaxSuppression if true, non-maximum suppression is applied to detected keypoints (corners).
 @param type one of the three neighborhoods as defined in the paper:
 FastFeatureDetector::TYPE_9_16, FastFeatureDetector::TYPE_7_12,
 FastFeatureDetector::TYPE_5_8
 
 Detects corners using the FAST algorithm by @cite Rosten06 .
 
-@note In Python API, types are given as cv.FAST_FEATURE_DETECTOR_TYPE_5_8,
-cv.FAST_FEATURE_DETECTOR_TYPE_7_12 and cv.FAST_FEATURE_DETECTOR_TYPE_9_16. For corner
-detection, use cv.FAST.detect() method.
+Check @ref tutorial_py_fast "the corresponding tutorial" for more details.
  */
 CV_EXPORTS void FAST( InputArray image, CV_OUT std::vector<KeyPoint>& keypoints,
-                      int threshold, bool nonmaxSuppression, FastFeatureDetector::DetectorType type );
+                      int threshold, bool nonmaxSuppression=true, FastFeatureDetector::DetectorType type=FastFeatureDetector::TYPE_9_16 );
 
 
 /** @brief Wrapping class for feature detection using the AGAST method. :
@@ -654,18 +646,13 @@ public:
     CV_WRAP virtual String getDefaultName() const CV_OVERRIDE;
 };
 
-/** @overload */
-CV_EXPORTS void AGAST( InputArray image, CV_OUT std::vector<KeyPoint>& keypoints,
-                      int threshold, bool nonmaxSuppression=true );
-
 /** @brief Detects corners using the AGAST algorithm
 
 @param image grayscale image where keypoints (corners) are detected.
 @param keypoints keypoints detected on the image.
 @param threshold threshold on difference between intensity of the central pixel and pixels of a
 circle around this pixel.
-@param nonmaxSuppression if true, non-maximum suppression is applied to detected corners
-(keypoints).
+@param nonmaxSuppression if true, non-maximum suppression is applied to detected keypoints (corners).
 @param type one of the four neighborhoods as defined in the paper:
 AgastFeatureDetector::AGAST_5_8, AgastFeatureDetector::AGAST_7_12d,
 AgastFeatureDetector::AGAST_7_12s, AgastFeatureDetector::OAST_9_16
@@ -677,7 +664,7 @@ Detects corners using the AGAST algorithm by @cite mair2010_agast .
 
  */
 CV_EXPORTS void AGAST( InputArray image, CV_OUT std::vector<KeyPoint>& keypoints,
-                      int threshold, bool nonmaxSuppression, AgastFeatureDetector::DetectorType type );
+                      int threshold, bool nonmaxSuppression=true, AgastFeatureDetector::DetectorType type=AgastFeatureDetector::OAST_9_16 );
 
 /** @brief Wrapping class for feature detection using the goodFeaturesToTrack function. :
  */
@@ -782,7 +769,7 @@ public:
   CV_WRAP virtual SimpleBlobDetector::Params getParams() const = 0;
 
   CV_WRAP virtual String getDefaultName() const CV_OVERRIDE;
-  CV_WRAP virtual const std::vector<std::vector<cv::Point> >& getBlobContours() const;
+  CV_WRAP virtual const std::vector<std::vector<cv::Point> >& getBlobContours() const = 0;
 };
 
 

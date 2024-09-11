@@ -12,7 +12,6 @@ Implementation of Batch Normalization layer.
 #include "../precomp.hpp"
 #include "layers_common.hpp"
 #include "../op_cuda.hpp"
-#include "../op_halide.hpp"
 #include "../op_inf_engine.hpp"
 #include "../ie_ngraph.hpp"
 #include "../op_webnn.hpp"
@@ -164,6 +163,11 @@ public:
                          std::vector<MatShape> &outputs,
                          std::vector<MatShape> &internals) const CV_OVERRIDE
     {
+        if (inputs[0].empty()) { // Support for 0D input
+            outputs.push_back(MatShape()); // Output is also a scalar.
+            return true;
+        }
+
         dims = inputs[0].size();
         if (!useGlobalStats && inputs[0][0] != 1)
             CV_Error(Error::StsNotImplemented, "Batch normalization in training mode with batch size > 1");
@@ -179,7 +183,6 @@ public:
 #endif
         return (backendId == DNN_BACKEND_OPENCV) ||
                backendId == DNN_BACKEND_CUDA ||
-               (backendId == DNN_BACKEND_HALIDE && haveHalide()) ||
                backendId == DNN_BACKEND_WEBNN ||
                backendId == DNN_BACKEND_CANN;
     }
@@ -274,6 +277,15 @@ public:
         inputs_arr.getMatVector(inputs);
         outputs_arr.getMatVector(outputs);
 
+        if (inputs[0].dims <= 1) { // Handling for 0D and 1D
+            Mat &inpBlob = inputs[0];
+            Mat &outBlob = outputs[0];
+            CV_Assert(inpBlob.total() == weights_.total());
+            cv::multiply(inpBlob, weights_, outBlob);
+            cv::add(outBlob, bias_, outBlob);
+            return;
+        }
+
         CV_Assert(blobs.size() >= 2);
         CV_Assert(inputs.size() == 1);
 
@@ -286,7 +298,6 @@ public:
         for (size_t ii = 0; ii < outputs.size(); ii++)
         {
             Mat &outBlob = outputs[ii];
-
             for(int num = 0; num < outBlob.size[0]; num++)
             {
                 for (int n = 0; n < outBlob.size[1]; n++)
@@ -342,52 +353,6 @@ public:
         return make_cuda_node<cuda4dnn::BatchNormOp>(preferableTarget, std::move(context->stream), weights_, bias_);
     }
 #endif
-
-    virtual Ptr<BackendNode> tryAttach(const Ptr<BackendNode>& node) CV_OVERRIDE
-    {
-        switch (node->backendId)
-        {
-            case DNN_BACKEND_HALIDE:
-            {
-#ifdef HAVE_HALIDE
-                auto base = node.dynamicCast<HalideBackendNode>();
-                Halide::Func& input = base->funcs.back();
-                Halide::Var x("x"), y("y"), c("c"), n("n");
-                Halide::Func top = attachHalide(input(x, y, c, n));
-                return Ptr<BackendNode>(new HalideBackendNode(base, top));
-#endif  // HAVE_HALIDE
-                break;
-            }
-        }
-        return Ptr<BackendNode>();
-    }
-
-    virtual Ptr<BackendNode> initHalide(const std::vector<Ptr<BackendWrapper> > &inputs) CV_OVERRIDE
-    {
-#ifdef HAVE_HALIDE
-        Halide::Buffer<float> input = halideBuffer(inputs[0]);
-        Halide::Var x("x"), y("y"), c("c"), n("n");
-        Halide::Func top = attachHalide(input(x, y, c, n));
-        return Ptr<BackendNode>(new HalideBackendNode(top));
-#endif  // HAVE_HALIDE
-        return Ptr<BackendNode>();
-    }
-
-#ifdef HAVE_HALIDE
-    // attachHalide can work both with Halide::Buffer and Halide::Func. In the
-    // second case it will be a fusion.
-    Halide::Func attachHalide(const Halide::Expr& input)
-    {
-        Halide::Func top = (name.empty() ? Halide::Func() : Halide::Func(name));
-        Halide::Var x("x"), y("y"), c("c"), n("n");
-
-        const int numChannels = weights_.total();
-        auto weights = wrapToHalideBuffer(weights_, {numChannels});
-        auto bias = wrapToHalideBuffer(bias_, {numChannels});
-        top(x, y, c, n) = input * weights(c) + bias(c);
-        return top;
-    }
-#endif  // HAVE_HALIDE
 
 #ifdef HAVE_CANN
     virtual Ptr<BackendNode> initCann(const std::vector<Ptr<BackendWrapper> > &inputs,
@@ -464,19 +429,6 @@ public:
         return Ptr<BackendNode>(new InfEngineNgraphNode(scale_shift));
     }
 #endif  // HAVE_DNN_NGRAPH
-
-    virtual bool tryQuantize(const std::vector<std::vector<float> > &scales,
-                             const std::vector<std::vector<int> > &zeropoints, LayerParams& params) CV_OVERRIDE
-    {
-        params.set("input_scale", scales[0][0]);
-        params.set("input_zeropoint", zeropoints[0][0]);
-        params.set("eps", epsilon);
-
-        params.blobs.clear();
-        params.blobs.push_back(origin_weights);
-        params.blobs.push_back(origin_bias);
-        return true;
-    }
 
 #ifdef HAVE_WEBNN
     virtual Ptr<BackendNode> initWebnn(const std::vector<Ptr<BackendWrapper> >& inputs, const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE

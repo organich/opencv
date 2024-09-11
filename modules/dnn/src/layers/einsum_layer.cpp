@@ -65,12 +65,12 @@ static Mat Transpose(
 
 
 bool IsTransposeRequired(size_t input_rank, const std::vector<size_t>& permutation) {
-    CV_Assert(input_rank == permutation.size());
 
     // No transpose required for scalars
-    if (input_rank == 0){
+    if (input_rank == 0 || permutation.size() == 0){
         return false;
     }
+    CV_Assert(input_rank == permutation.size());
 
     // Weeds out cases where permutation is something like [0, 1, 2] for a 3D input and so on
     bool transpose_required = false;
@@ -499,7 +499,7 @@ public:
             } else {
                 // Check if there is a pre-processed version of this input
                 // If so assign it to result
-                if (!preProcessedInputs[0].empty())
+                if (!preProcessedInputs.empty() && !preProcessedInputs[0].empty())
                 {
                     result = preProcessedInputs[0];
                 }
@@ -876,8 +876,13 @@ void LayerEinsumImpl::processEquation(const std::vector<MatShape>& inputs)
     // Check if number of tokens in equal to number of inputs.
     // For install "ij, jk -> ik" needs to have 2 inputs tensors
     int num_input_tensors = inputs.size();
-    CV_CheckEQ(static_cast<int>(lhs_eq_tokens.size()), num_input_tensors,
-        "Number of input tensors does not match the number of subscripts in the input equation");
+    if (lhs_eq_tokens.empty() || (lhs_eq_tokens.size() == 1 && lhs_eq_tokens[0].empty() && lhs_eq == ",") ) {
+        return;
+    }
+    // if we have only one token and two inputs lets skip the check
+    if (lhs_eq_tokens.size() > 1)
+        CV_CheckEQ(static_cast<int>(lhs_eq_tokens.size()), num_input_tensors,
+            "Number of input tensors does not match the number of subscripts in the input equation");
 
     int inputIdx = 0;
     for (const auto& token : lhs_eq_tokens)
@@ -1353,21 +1358,30 @@ Mat LayerEinsumImpl::batchwiseMatMul(
     } else {
 
         // input1 should of size MxK
-        if (input1.dims > 2 || input1.size[0] != M || input1.size[1] != K)
+        // check if input1 needs reshape, if need reshape
+        if (input1.dims > 2 || input1.size[0] != M || (input1.dims > 1 && input1.size[1] != K) || input1.dims == 1)
         {
             int shape[] = {M, K};
             reshapedInput1 = input1.reshape(1, 2, shape);
         }
 
         // input2 should be of size KxN
-        if (input2.dims > 2 || input2.size[0] != K || input2.size[1] != N)
+        // check if input2 needs reshape, if needs reshape
+        if (input2.dims > 2 || input2.size[0] != K || (input2.dims > 1 &&  input2.size[1] != N) || input2.dims == 1)
         {
             int shape2[] = {K, N};
             reshapedInput2 = input2.reshape(1, 2, shape2);
         }
 
         output = Mat(M, N, reshapedInput1.type());
-        fastGemm(false, false, 1.0, reshapedInput1, reshapedInput2, 0.0, output, opt);
+        if ((shape(reshapedInput1).empty() && shape(reshapedInput2).empty())  ||
+            (shape(reshapedInput1).empty() && !shape(reshapedInput2).empty()) ||
+            (!shape(reshapedInput1).empty() && shape(reshapedInput2).empty()))
+        {
+            output = reshapedInput1.mul(reshapedInput2); // fastGemm does not support 0D * 0D multiplication
+        } else {
+            fastGemm(false, false, 1.0, reshapedInput1, reshapedInput2, 0.0, output, opt);
+        }
 
         output = output.reshape(1, {1, M, N});
     }

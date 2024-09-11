@@ -53,9 +53,6 @@
 /* Geospatial Data Abstraction Library */
 #cmakedefine HAVE_GDAL
 
-/* Halide support */
-#cmakedefine HAVE_HALIDE
-
 /* Vulkan support */
 #cmakedefine HAVE_VULKAN
 
@@ -140,13 +137,13 @@
 /* Library was compiled with functions instrumentation */
 #cmakedefine ENABLE_INSTRUMENTATION
 
-/* OpenVX */
-#cmakedefine HAVE_OPENVX
-
 /* OpenCV trace utilities */
 #cmakedefine OPENCV_TRACE
 
 /* Library QR-code decoding */
 #cmakedefine HAVE_QUIRC
+
+/* The font "uni" (WQY MicroHei) is available */
+#cmakedefine HAVE_UNIFONT
 
 #endif // OPENCV_CVCONFIG_H_INCLUDED

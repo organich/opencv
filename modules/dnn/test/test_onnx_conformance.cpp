@@ -1137,10 +1137,6 @@ TEST_P(Test_ONNX_conformance, Layer_Test)
         {
             applyTestTag(CV_TEST_TAG_DNN_SKIP_CPU, CV_TEST_TAG_DNN_SKIP_OPENCV_BACKEND, CV_TEST_TAG_DNN_SKIP_ONNX_CONFORMANCE);
         }
-
-        if (name == "test_pow") {
-            default_lInf = 0.00013; // Expected: (normInf) <= (lInf), actual: 0.00012207 vs 0.0001
-        }
         if (name == "test_gelu_tanh_1") {
             default_l1 = 0.00011; // Expected: (normL1) <= (l1), actual: 0.000101805 vs 1e-05
             default_lInf = 0.00016; // Expected: (normInf) <= (lInf), actual: 0.000152707 vs 0.0001
@@ -1340,7 +1336,7 @@ TEST_P(Test_ONNX_conformance, Layer_Test)
 INSTANTIATE_TEST_CASE_P(/**/, Test_ONNX_conformance,
     testing::Combine(
         testing::ValuesIn(testConformanceConfig),
-        dnnBackendsAndTargets(/*withInferenceEngine=*/true, /*withHalide=*/true)
+        dnnBackendsAndTargets(/* withInferenceEngine = */ true)
     ),
     printOnnxConfParams
 );

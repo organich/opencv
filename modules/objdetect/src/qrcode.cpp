@@ -7,7 +7,7 @@
 
 #include "precomp.hpp"
 #include "opencv2/objdetect.hpp"
-#include "opencv2/calib3d.hpp"
+#include "opencv2/3d.hpp"
 #include <opencv2/core/utils/logger.hpp>
 #include "graphical_code_detector_impl.hpp"
 
@@ -56,9 +56,10 @@ static void updatePointsResult(OutputArray points_, const vector<Point2f>& point
         int N = int(points.size() / 4);
         if (N > 0)
         {
-            Mat m_p(N, 4, CV_32FC2, (void*)&points[0]);
+            int nrows = points_.kind() == _InputArray::STD_VECTOR ? 1 : N;
+            Mat m_p(nrows, N*4/nrows, CV_32FC2, (void*)&points[0]);
             int points_type = points_.fixedType() ? points_.type() : CV_32FC2;
-            m_p.reshape(2, points_.rows()).convertTo(points_, points_type);  // Mat layout: N x 4 x 2cn
+            m_p.convertTo(points_, points_type);  // Mat layout: N x 4 x 2cn
         }
         else
         {

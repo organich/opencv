@@ -167,7 +167,7 @@ private:
 class CvWindow
 {
 public:
-    CvWindow(cv::String name, int flag = CV_WINDOW_NORMAL);
+    CvWindow(cv::String name, int flag = cv::WINDOW_NORMAL);
     ~CvWindow();
 
     /** @brief NOTE: prototype.
@@ -189,7 +189,7 @@ public:
 
     The function updates window image. If argument is null or image control is not found - does nothing.
     */
-    void            updateImage(CvMat* arr);
+    void            updateImage(InputArray arr);
 
     /** @brief Returns reference to the trackbar(slider) registered within provided window.
 

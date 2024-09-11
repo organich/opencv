@@ -7,12 +7,13 @@ set(OPENCV_CPP_SAMPLES_REQUIRED_DEPS
   opencv_imgcodecs
   opencv_videoio
   opencv_highgui
-  opencv_ml
   opencv_video
   opencv_objdetect
   opencv_photo
   opencv_features2d
-  opencv_calib3d
+  opencv_3d
+  opencv_stereo
+  opencv_calib
   opencv_stitching
   opencv_dnn
   opencv_gapi

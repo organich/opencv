@@ -447,9 +447,10 @@ The function getWindowImageRect returns the client screen coordinates, width and
  */
 CV_EXPORTS_W Rect getWindowImageRect(const String& winname);
 
-/** @example samples/cpp/create_mask.cpp
+/** @example samples/cpp/snippets/create_mask.cpp
 This program demonstrates using mouse events and how to make and use a mask image (black and white) .
 */
+
 /** @brief Sets mouse handler for the specified window
 
 @param winname Name of the window.
@@ -755,7 +756,7 @@ CV_EXPORTS_W void displayOverlay(const String& winname, const String& text, int 
 
 The function displayStatusBar displays useful information/tips on top of the window for a certain
 amount of time *delayms* . This information is displayed on the window statusbar (the window must be
-created with the CV_GUI_EXPANDED flags).
+created with the cv::WINDOW_GUI_EXPANDED flags).
 
 @param winname Name of the window.
 @param text Text to write on the window statusbar.

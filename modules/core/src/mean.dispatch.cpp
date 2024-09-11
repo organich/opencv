@@ -5,7 +5,6 @@
 
 #include "precomp.hpp"
 #include "opencl_kernels_core.hpp"
-#include "opencv2/core/openvx/ovx_defs.hpp"
 #include "stat.hpp"
 
 #ifndef OPENCV_IPP_MEAN
@@ -40,7 +39,7 @@ static bool ipp_mean( Mat &src, Mat &mask, Scalar &ret )
     if (cn > 4)
         return false;
     int rows = src.size[0], cols = rows ? (int)(total_size/rows) : 0;
-    if( src.dims == 2 || (src.isContinuous() && mask.isContinuous() && cols > 0 && (size_t)rows*cols == total_size) )
+    if( src.dims <= 2 || (src.isContinuous() && mask.isContinuous() && cols > 0 && (size_t)rows*cols == total_size) )
     {
         IppiSize sz = { cols, rows };
         int type = src.type();
@@ -127,7 +126,7 @@ Scalar mean(InputArray _src, InputArray _mask)
     CV_INSTRUMENT_REGION();
 
     Mat src = _src.getMat(), mask = _mask.getMat();
-    CV_Assert( mask.empty() || mask.type() == CV_8U );
+    CV_Assert( mask.empty() || mask.type() == CV_8U || mask.type() == CV_8S || mask.type() == CV_Bool);
 
     int k, cn = src.channels(), depth = src.depth();
     Scalar s;
@@ -141,20 +140,19 @@ Scalar mean(InputArray _src, InputArray _mask)
     const Mat* arrays[] = {&src, &mask, 0};
     uchar* ptrs[2] = {};
     NAryMatIterator it(arrays, ptrs);
-    int total = (int)it.size, blockSize = total, intSumBlockSize = 0;
+    int total = (int)it.size, blockSize = total, partialBlockSize = 0;
     int j, count = 0;
-    AutoBuffer<int> _buf;
+    int _buf[CV_CN_MAX];
     int* buf = (int*)&s[0];
-    bool blockSum = depth <= CV_16S;
+    bool partialSumIsInt = depth < CV_32S;
+    bool blockSum = partialSumIsInt || depth == CV_16F || depth == CV_16BF;
     size_t esz = 0, nz0 = 0;
 
     if( blockSum )
     {
-        intSumBlockSize = depth <= CV_8S ? (1 << 23) : (1 << 15);
-        blockSize = std::min(blockSize, intSumBlockSize);
-        _buf.allocate(cn);
-        buf = _buf.data();
-
+        partialBlockSize = depth <= CV_8S ? (1 << 23) : (1 << 15);
+        blockSize = std::min(blockSize, partialBlockSize);
+        buf = _buf;
         for( k = 0; k < cn; k++ )
             buf[k] = 0;
         esz = src.elemSize();
@@ -168,12 +166,20 @@ Scalar mean(InputArray _src, InputArray _mask)
             int nz = func( ptrs[0], ptrs[1], (uchar*)buf, bsz, cn );
             count += nz;
             nz0 += nz;
-            if( blockSum && (count + blockSize >= intSumBlockSize || (i+1 >= it.nplanes && j+bsz >= total)) )
+            if( blockSum && (count + blockSize >= partialBlockSize || (i+1 >= it.nplanes && j+bsz >= total)) )
             {
-                for( k = 0; k < cn; k++ )
-                {
-                    s[k] += buf[k];
-                    buf[k] = 0;
+                if (partialSumIsInt) {
+                    for( k = 0; k < cn; k++ )
+                    {
+                        s[k] += buf[k];
+                        buf[k] = 0;
+                    }
+                } else {
+                    for( k = 0; k < cn; k++ )
+                    {
+                        s[k] += ((float*)buf)[k];
+                        buf[k] = 0;
+                    }
                 }
                 count = 0;
             }
@@ -221,7 +227,7 @@ static bool ocl_meanStdDev( InputArray _src, OutputArray _mean, OutputArray _sdv
         int ddepth = std::max(CV_32S, depth), sqddepth = std::max(CV_32F, depth),
                 dtype = CV_MAKE_TYPE(ddepth, cn),
                 sqdtype = CV_MAKETYPE(sqddepth, cn);
-        CV_Assert(!haveMask || _mask.type() == CV_8UC1);
+        CV_Assert(!haveMask || _mask.type() == CV_8U || _mask.type() == CV_8S || _mask.type() == CV_Bool);
 
         int wgs2_aligned = 1;
         while (wgs2_aligned < (int)wgs)
@@ -312,69 +318,6 @@ static bool ocl_meanStdDev( InputArray _src, OutputArray _mean, OutputArray _sdv
 }
 #endif
 
-#ifdef HAVE_OPENVX
-    static bool openvx_meanStdDev(Mat& src, OutputArray _mean, OutputArray _sdv, Mat& mask)
-    {
-        size_t total_size = src.total();
-        int rows = src.size[0], cols = rows ? (int)(total_size / rows) : 0;
-        if (src.type() != CV_8UC1|| !mask.empty() ||
-               (src.dims != 2 && !(src.isContinuous() && cols > 0 && (size_t)rows*cols == total_size))
-           )
-        return false;
-
-        try
-        {
-            ivx::Context ctx = ovx::getOpenVXContext();
-#ifndef VX_VERSION_1_1
-            if (ctx.vendorID() == VX_ID_KHRONOS)
-                return false; // Do not use OpenVX meanStdDev estimation for sample 1.0.1 implementation due to lack of accuracy
-#endif
-
-            ivx::Image
-                ia = ivx::Image::createFromHandle(ctx, VX_DF_IMAGE_U8,
-                    ivx::Image::createAddressing(cols, rows, 1, (vx_int32)(src.step[0])), src.ptr());
-
-            vx_float32 mean_temp, stddev_temp;
-            ivx::IVX_CHECK_STATUS(vxuMeanStdDev(ctx, ia, &mean_temp, &stddev_temp));
-
-            if (_mean.needed())
-            {
-                if (!_mean.fixedSize())
-                    _mean.create(1, 1, CV_64F, -1, true);
-                Mat mean = _mean.getMat();
-                CV_Assert(mean.type() == CV_64F && mean.isContinuous() &&
-                    (mean.cols == 1 || mean.rows == 1) && mean.total() >= 1);
-                double *pmean = mean.ptr<double>();
-                pmean[0] = mean_temp;
-                for (int c = 1; c < (int)mean.total(); c++)
-                    pmean[c] = 0;
-            }
-
-            if (_sdv.needed())
-            {
-                if (!_sdv.fixedSize())
-                    _sdv.create(1, 1, CV_64F, -1, true);
-                Mat stddev = _sdv.getMat();
-                CV_Assert(stddev.type() == CV_64F && stddev.isContinuous() &&
-                    (stddev.cols == 1 || stddev.rows == 1) && stddev.total() >= 1);
-                double *pstddev = stddev.ptr<double>();
-                pstddev[0] = stddev_temp;
-                for (int c = 1; c < (int)stddev.total(); c++)
-                    pstddev[c] = 0;
-            }
-        }
-        catch (const ivx::RuntimeError & e)
-        {
-            VX_DbgThrow(e.what());
-        }
-        catch (const ivx::WrapperError & e)
-        {
-            VX_DbgThrow(e.what());
-        }
-
-        return true;
-    }
-#endif
 
 #ifdef HAVE_IPP
 static bool ipp_meanStdDev(Mat& src, OutputArray _mean, OutputArray _sdv, Mat& mask)
@@ -410,7 +353,7 @@ static bool ipp_meanStdDev(Mat& src, OutputArray _mean, OutputArray _sdv, Mat& m
 
     size_t total_size = src.total();
     int rows = src.size[0], cols = rows ? (int)(total_size/rows) : 0;
-    if( src.dims == 2 || (src.isContinuous() && mask.isContinuous() && cols > 0 && (size_t)rows*cols == total_size) )
+    if( src.dims <= 2 || (src.isContinuous() && mask.isContinuous() && cols > 0 && (size_t)rows*cols == total_size) )
     {
         Ipp64f mean_temp[3];
         Ipp64f stddev_temp[3];
@@ -518,17 +461,14 @@ void meanStdDev(InputArray _src, OutputArray _mean, OutputArray _sdv, InputArray
     CV_INSTRUMENT_REGION();
 
     CV_Assert(!_src.empty());
-    CV_Assert( _mask.empty() || _mask.type() == CV_8UC1 );
+    CV_Assert( _mask.empty() || _mask.type() == CV_8U || _mask.type() == CV_8S || _mask.type() == CV_Bool );
 
     CV_OCL_RUN(OCL_PERFORMANCE_CHECK(_src.isUMat()) && _src.dims() <= 2,
                ocl_meanStdDev(_src, _mean, _sdv, _mask))
 
     Mat src = _src.getMat(), mask = _mask.getMat();
 
-    CV_Assert(mask.empty() || src.size == mask.size);
-
-    CV_OVX_RUN(!ovx::skipSmallImages<VX_KERNEL_MEAN_STDDEV>(src.cols, src.rows),
-               openvx_meanStdDev(src, _mean, _sdv, mask))
+    CV_Assert(mask.empty() || ((mask.type() == CV_8U || mask.type() == CV_8S || mask.type() == CV_Bool) && src.size == mask.size));
 
     CV_IPP_RUN(IPP_VERSION_X100 >= 700, ipp_meanStdDev(src, _mean, _sdv, mask));
 
@@ -591,12 +531,14 @@ void meanStdDev(InputArray _src, OutputArray _mean, OutputArray _sdv, InputArray
     const Mat* arrays[] = {&src, &mask, 0};
     uchar* ptrs[2] = {};
     NAryMatIterator it(arrays, ptrs);
-    int total = (int)it.size, blockSize = total, intSumBlockSize = 0;
+    int total = (int)it.size, blockSize = total, partialBlockSize = 0;
     int j, count = 0, nz0 = 0;
-    AutoBuffer<double> _buf(cn*4);
-    double *s = (double*)_buf.data(), *sq = s + cn;
+    double _buf[CV_CN_MAX*4];
+    double *s = _buf, *sq = s + cn;
     int *sbuf = (int*)s, *sqbuf = (int*)sq;
-    bool blockSum = depth <= CV_16S, blockSqSum = depth <= CV_8S;
+    bool partialSumIsInt = depth < CV_32S;
+    bool blockSum = partialSumIsInt || depth == CV_16F || depth == CV_16BF;
+    bool blockSqSum = depth <= CV_8S;
     size_t esz = 0;
 
     for( k = 0; k < cn; k++ )
@@ -604,8 +546,8 @@ void meanStdDev(InputArray _src, OutputArray _mean, OutputArray _sdv, InputArray
 
     if( blockSum )
     {
-        intSumBlockSize = 1 << 15;
-        blockSize = std::min(blockSize, intSumBlockSize);
+        partialBlockSize = 1 << 15;
+        blockSize = std::min(blockSize, partialBlockSize);
         sbuf = (int*)(sq + cn);
         if( blockSqSum )
             sqbuf = sbuf + cn;
@@ -622,12 +564,20 @@ void meanStdDev(InputArray _src, OutputArray _mean, OutputArray _sdv, InputArray
             int nz = func( ptrs[0], ptrs[1], (uchar*)sbuf, (uchar*)sqbuf, bsz, cn );
             count += nz;
             nz0 += nz;
-            if( blockSum && (count + blockSize >= intSumBlockSize || (i+1 >= it.nplanes && j+bsz >= total)) )
+            if( blockSum && (count + blockSize >= partialBlockSize || (i+1 >= it.nplanes && j+bsz >= total)) )
             {
-                for( k = 0; k < cn; k++ )
-                {
-                    s[k] += sbuf[k];
-                    sbuf[k] = 0;
+                if (partialSumIsInt) {
+                    for( k = 0; k < cn; k++ )
+                    {
+                        s[k] += sbuf[k];
+                        sbuf[k] = 0;
+                    }
+                } else {
+                    for( k = 0; k < cn; k++ )
+                    {
+                        s[k] += ((float*)sbuf)[k];
+                        sbuf[k] = 0;
+                    }
                 }
                 if( blockSqSum )
                 {

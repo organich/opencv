@@ -78,6 +78,17 @@ public:
         return false;
     }
 
+    void getTypes(const std::vector<MatType>& inputs,
+        const int requiredOutputs,
+        const int requiredInternals,
+        std::vector<MatType>& outputs,
+        std::vector<MatType>& internals) const CV_OVERRIDE
+    {
+        CV_Assert(inputs.size());
+        outputs.assign(requiredOutputs, inputs[0]);
+    }
+
+
     virtual void finalize(InputArrayOfArrays inputs_arr, OutputArrayOfArrays outputs_arr) CV_OVERRIDE {
         std::vector<Mat> inputs;
         inputs_arr.getMatVector(inputs);
@@ -108,12 +119,6 @@ public:
     void forward(InputArrayOfArrays inputs_arr, OutputArrayOfArrays outputs_arr, OutputArrayOfArrays internals_arr) CV_OVERRIDE {
         CV_TRACE_FUNCTION();
         CV_TRACE_ARG_VALUE(name, "name", name.c_str());
-
-        if (inputs_arr.depth() == CV_16F)
-        {
-            forward_fallback(inputs_arr, outputs_arr, internals_arr);
-            return;
-        }
 
         std::vector<Mat> inputs, outputs;
         inputs_arr.getMatVector(inputs);

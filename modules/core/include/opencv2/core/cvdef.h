@@ -288,6 +288,7 @@ namespace cv {
 #define CV_CPU_VSX3             201
 
 #define CV_CPU_RVV              210
+#define CV_CPU_RVV_ZVFH         211
 
 #define CV_CPU_LSX              230
 #define CV_CPU_LASX             231
@@ -350,6 +351,7 @@ enum CpuFeatures {
     CPU_VSX3            = 201,
 
     CPU_RVV             = 210,
+    CPU_RVV_ZVFH        = 211,
 
     CPU_LSX             = 230,
     CPU_LASX            = 231,
@@ -384,6 +386,8 @@ enum CpuFeatures {
 #if defined __ARM_FP16_FORMAT_IEEE \
     && !defined __CUDACC__
 #  define CV_FP16_TYPE 1
+#elif (defined(__riscv_zvfh) && __riscv_zvfh) || (defined(__riscv_zvfhmin) && __riscv_zvfhmin)
+#  define CV_FP16_TYPE 1
 #else
 #  define CV_FP16_TYPE 0
 #endif
@@ -392,8 +396,10 @@ typedef union Cv16suf
 {
     short i;
     ushort u;
-#if CV_FP16_TYPE
+#if CV_FP16_TYPE && defined __ARM_FP16_FORMAT_IEEE
     __fp16 h;
+#elif CV_FP16_TYPE // Other platforms suggested to use _Float16
+    _Float16 h;
 #endif
 }
 Cv16suf;
@@ -415,11 +421,12 @@ typedef union Cv64suf
 Cv64suf;
 
 #ifndef OPENCV_ABI_COMPATIBILITY
-#define OPENCV_ABI_COMPATIBILITY 400
+#define OPENCV_ABI_COMPATIBILITY 500
 #endif
 
 #ifdef __OPENCV_BUILD
-#  define DISABLE_OPENCV_3_COMPATIBILITY
+#  define DISABLE_OPENCV_3_COMPATIBILITY  // OpenCV 5.0: remove that
+#  define DISABLE_OPENCV_4_COMPATIBILITY
 #  define OPENCV_DISABLE_DEPRECATED_COMPATIBILITY
 #endif
 
@@ -504,9 +511,13 @@ Cv64suf;
 #define CV_SUBMAT_FLAG          (1 << CV_SUBMAT_FLAG_SHIFT)
 #define CV_IS_SUBMAT(flags)     ((flags) & CV_MAT_SUBMAT_FLAG)
 
-/** Size of each channel item,
-   0x28442211 = 0010 1000 0100 0100 0010 0010 0001 0001 ~ array of sizeof(arr_type_elem) */
-#define CV_ELEM_SIZE1(type) ((0x28442211 >> CV_MAT_DEPTH(type)*4) & 15)
+/** Size of an array/scalar single-channel value, 4 bits per type:
+    CV_8U - 1 byte
+    CV_8S - 1 byte
+    CV_16U - 2 bytes
+    ...
+*/
+#define CV_ELEM_SIZE1(type) ((int)((0x4881228442211ULL >> (CV_MAT_DEPTH(type) * 4)) & 15))
 
 #define CV_ELEM_SIZE(type) (CV_MAT_CN(type)*CV_ELEM_SIZE1(type))
 
@@ -834,12 +845,18 @@ class hfloat
 {
 public:
 #if CV_FP16_TYPE
-
-    hfloat() : h(0) {}
-    explicit hfloat(float x) { h = (__fp16)x; }
+    hfloat() = default;
     operator float() const { return (float)h; }
+#if defined __ARM_FP16_FORMAT_IEEE
+    explicit hfloat(float x) { h = (__fp16)x; }
 protected:
     __fp16 h;
+#else
+    explicit hfloat(float x) { h = (_Float16)x; }
+    explicit operator _Float16() const { return h; }
+protected:
+    _Float16 h;
+#endif
 
 #else
     hfloat() : w(0) {}
@@ -921,12 +938,42 @@ inline hfloat hfloatFromBits(ushort w) {
 #endif
 }
 
-#if !defined(__OPENCV_BUILD) && !(defined __STDCPP_FLOAT16_T__) && !(defined __ARM_NEON)
-typedef hfloat float16_t;
-#endif
+class bfloat
+{
+public:
+    bfloat() : w(0) {}
+
+    explicit bfloat(float x)
+    {
+        Cv32suf in;
+        in.f = x;
+        w = (ushort)(in.u >> 16);
+    }
+
+    operator float() const
+    {
+        Cv32suf out;
+        out.u = w << 16;
+        return out.f;
+    }
+
+protected:
+    ushort w;
+};
 
 }
 #endif
+
+/** @brief Constructs the 'fourcc' code, used in video codecs and many other places.
+    Simply call it with 4 chars like `CV_FOURCC('I', 'Y', 'U', 'V')`
+*/
+CV_INLINE int CV_FOURCC(char c1, char c2, char c3, char c4)
+{
+    return (c1 & 255) + ((c2 & 255) << 8) + ((c3 & 255) << 16) + ((c4 & 255) << 24);
+}
+
+//! Macro to construct the fourcc code of the codec. Same as CV_FOURCC()
+#define CV_FOURCC_MACRO(c1, c2, c3, c4) (((c1) & 255) + (((c2) & 255) << 8) + (((c3) & 255) << 16) + (((c4) & 255) << 24))
 
 //! @}
 

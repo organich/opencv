@@ -41,7 +41,7 @@ static void broadcast1D2TargetMat(Mat& data, const MatShape& targetShape, int ax
 static void block_repeat(InputArray src, const MatShape& srcShape, int axis, int repetitions, OutputArray dst)
 {
     CV_Assert(src.getObj() != dst.getObj());
-    CV_Check(axis, axis >= 0 && axis < src.dims(), "Axis out of range");
+    CV_Check(axis, axis >= 0 && (axis < src.dims() || (src.dims()==1 && axis==1)), "axis is out of range"); // (src.dims()==1 && axis==1) has been added as a temporary fix for quantized models. Refer issue https://github.com/opencv/opencv_zoo/issues/273
     CV_CheckGT(repetitions, 1, "More than one repetition expected");
 
     Mat src_mat = src.getMat();
@@ -188,6 +188,16 @@ public:
         Layer::getMemoryShapes(inputs, requiredOutputs, outputs, internals);
         return false;
     }
+
+    void getTypes(const std::vector<MatType>& inputs,
+        const int requiredOutputs,
+        const int requiredInternals,
+        std::vector<MatType>& outputs,
+        std::vector<MatType>& internals) const CV_OVERRIDE
+    {
+        outputs.assign(requiredOutputs, CV_8S);
+    }
+
 
     virtual void finalize(InputArrayOfArrays inputs_arr, OutputArrayOfArrays outputs_arr) CV_OVERRIDE
     {
@@ -349,6 +359,19 @@ public:
         Layer::getMemoryShapes(inputs, requiredOutputs, outputs, internals);
         return false;
     }
+
+    void getTypes(const std::vector<MatType>& inputs,
+        const int requiredOutputs,
+        const int requiredInternals,
+        std::vector<MatType>& outputs,
+        std::vector<MatType>& internals) const CV_OVERRIDE
+    {
+        if (preferableTarget == DNN_TARGET_OPENCL_FP16)
+            outputs.assign(requiredOutputs, CV_16F);
+        else
+            outputs.assign(requiredOutputs, CV_32F);
+    }
+
 
     virtual void finalize(InputArrayOfArrays inputs_arr, OutputArrayOfArrays outputs_arr) CV_OVERRIDE
     {

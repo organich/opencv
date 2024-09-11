@@ -5,7 +5,6 @@
 #ifndef __OPENCV_DNN_SRC_NET_IMPL_HPP__
 #define __OPENCV_DNN_SRC_NET_IMPL_HPP__
 
-#include "op_halide.hpp"
 #include "op_inf_engine.hpp"
 #include "ie_ngraph.hpp"
 #include "op_vkcom.hpp"
@@ -54,7 +53,6 @@ struct Net::Impl : public detail::NetImplBase
     BlobManager blobManager;
     int preferableBackend;
     int preferableTarget;
-    String halideConfigFile;
     bool hasDynamicShapes;
     // Map host data to backend specific wrapper.
     std::map<void*, Ptr<BackendWrapper>> backendWrappers;
@@ -167,12 +165,6 @@ struct Net::Impl : public detail::NetImplBase
 
     virtual void initBackend(const std::vector<LayerPin>& blobsToKeep_);
 
-    void setHalideScheduler(const String& scheduler);
-#ifdef HAVE_HALIDE
-    void compileHalide();
-    void initHalideBackend();
-#endif
-
 #ifdef HAVE_WEBNN
     void addWebnnOutputs(LayerData& ld);
     void initWebnnBackend(const std::vector<LayerPin>& blobsToKeep_);
@@ -235,33 +227,41 @@ struct Net::Impl : public detail::NetImplBase
 
     void getLayersShapes(
             const ShapesVec& netInputShapes,
+            const TypesVec& netInputTypes,
             std::vector<int>& layersIds,
             std::vector<ShapesVec>& inLayersShapes,
             std::vector<ShapesVec>& outLayersShapes) /*const*/;
 
     void getLayersShapes(const ShapesVec& netInputShapes,
+            const TypesVec& netInputTypes,
             LayersShapesMap& inOutShapes);
 
     void getLayerShapes(const ShapesVec& netInputShapes,
+            const TypesVec& netInputTypes,
             const int layerId,
             LayerShapes& shapes);
 
     void updateLayersShapes();
 
-    int64 getFLOPS(const std::vector<MatShape>& netInputShapes) /*const*/;
+    int64 getFLOPS(const std::vector<MatShape>& netInputShapes,
+                   const std::vector<MatType>& netInputTypes) /*const*/;
     int64 getFLOPS(
             const int layerId,
-            const std::vector<MatShape>& netInputShapes) /*const*/;
+            const std::vector<MatShape>& netInputShapes,
+            const std::vector<MatType>& netInputTypes) /*const*/;
 
     void getMemoryConsumption(
             const int layerId,
             const std::vector<MatShape>& netInputShapes,
+            const std::vector<MatType>& netInputTypes,
             size_t& weights, size_t& blobs) /*const*/;
     void getMemoryConsumption(
             const std::vector<MatShape>& netInputShapes,
+            const std::vector<MatType>& netInputTypes,
             size_t& weights, size_t& blobs) /*const*/;
     void getMemoryConsumption(
             const std::vector<MatShape>& netInputShapes,
+            const std::vector<MatType>& netInputTypes,
             std::vector<int>& layerIds, std::vector<size_t>& weights,
             std::vector<size_t>& blobs) /*const*/;
     int64 getPerfProfile(std::vector<double>& timings) const;
@@ -281,11 +281,6 @@ struct Net::Impl : public detail::NetImplBase
     string dumpToPbtxt(bool forceAllocation = false) const;
 
     void dumpNetworkToFile() const;
-
-    // FIXIT drop from inference API
-    Net quantize(Net& net, InputArrayOfArrays calibData, int inputsDtype, int outputsDtype, bool perChannel) /*const*/;
-    void getInputDetails(std::vector<float>& scales, std::vector<int>& zeropoints) /*const*/;
-    void getOutputDetails(std::vector<float>& scales, std::vector<int>& zeropoints) /*const*/;
 
 };  // Net::Impl
 

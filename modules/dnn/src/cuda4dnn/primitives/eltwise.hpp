@@ -100,8 +100,7 @@ namespace cv { namespace dnn { namespace cuda4dnn {
                 auto input_wrapper_0 = inputs[0].dynamicCast<wrapper_type>();
                 auto input_0 = input_wrapper_0->getView();
                 csl::tensor_ops::copy(stream, output, input_0);
-            } else
-            {
+            } else {
                 auto input_wrapper_0 = inputs[0].dynamicCast<wrapper_type>();
                 auto input_0 = input_wrapper_0->getView();
 

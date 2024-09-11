@@ -1553,6 +1553,22 @@ void filter2D(InputArray _src, OutputArray _dst, int ddepth,
                   delta, borderType, src.isSubmatrix());
 }
 
+void filter2D( InputArray src, OutputArray dst, InputArray kernel,
+               const Filter2DParams& params)
+{
+    Mat K = kernel.getMat(), tempK;
+    if (params.scale != 1) {
+        int kdepth = K.depth();
+        K.convertTo(tempK,
+            kdepth == CV_32F || kdepth == CV_64F ? kdepth : CV_32F,
+            params.scale, 0);
+        K = tempK;
+    }
+    CV_Assert(params.borderValue == Scalar());
+    filter2D(src, dst, params.ddepth, K, Point(params.anchorX, params.anchorY),
+             params.shift, params.borderType);
+}
+
 void sepFilter2D(InputArray _src, OutputArray _dst, int ddepth,
                  InputArray _kernelX, InputArray _kernelY, Point anchor,
                  double delta, int borderType)
@@ -1595,16 +1611,3 @@ void sepFilter2D(InputArray _src, OutputArray _dst, int ddepth,
 }
 
 } // namespace
-
-CV_IMPL void
-cvFilter2D( const CvArr* srcarr, CvArr* dstarr, const CvMat* _kernel, CvPoint anchor )
-{
-    cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr);
-    cv::Mat kernel = cv::cvarrToMat(_kernel);
-
-    CV_Assert( src.size() == dst.size() && src.channels() == dst.channels() );
-
-    cv::filter2D( src, dst, dst.depth(), kernel, anchor, 0, cv::BORDER_REPLICATE );
-}
-
-/* End of file. */

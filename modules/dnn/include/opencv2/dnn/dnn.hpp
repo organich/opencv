@@ -62,6 +62,7 @@ CV__DNN_INLINE_NS_BEGIN
 //! @{
 
     typedef std::vector<int> MatShape;
+    typedef int MatType;
 
     /**
      * @brief Enum of computation backends supported by layers.
@@ -71,9 +72,8 @@ CV__DNN_INLINE_NS_BEGIN
     {
         //! DNN_BACKEND_DEFAULT equals to OPENCV_DNN_BACKEND_DEFAULT, which can be defined using CMake or a configuration parameter
         DNN_BACKEND_DEFAULT = 0,
-        DNN_BACKEND_HALIDE,
-        DNN_BACKEND_INFERENCE_ENGINE,            //!< Intel OpenVINO computational backend
-                                                 //!< @note Tutorial how to build OpenCV with OpenVINO: @ref tutorial_dnn_openvino
+        DNN_BACKEND_INFERENCE_ENGINE = 2,            //!< Intel OpenVINO computational backend
+                                                     //!< @note Tutorial how to build OpenCV with OpenVINO: @ref tutorial_dnn_openvino
         DNN_BACKEND_OPENCV,
         DNN_BACKEND_VKCOM,
         DNN_BACKEND_CUDA,
@@ -206,8 +206,16 @@ CV__DNN_INLINE_NS_BEGIN
          */
         virtual void setHostDirty() = 0;
 
+        int getHostMatDepth() {
+            CV_Assert(hostMatDepth != -1);
+            return hostMatDepth;
+        }
+
         int backendId;  //!< Backend identifier.
         int targetId;   //!< Target identifier.
+
+    protected:
+        int hostMatDepth = -1;
     };
 
     class CV_EXPORTS ActivationLayer;
@@ -260,15 +268,6 @@ CV__DNN_INLINE_NS_BEGIN
          */
         virtual void forward(InputArrayOfArrays inputs, OutputArrayOfArrays outputs, OutputArrayOfArrays internals);
 
-        /** @brief Tries to quantize the given layer and compute the quantization parameters required for fixed point implementation.
-         *  @param[in] scales input and output scales.
-         *  @param[in] zeropoints input and output zeropoints.
-         *  @param[out] params Quantized parameters required for fixed point implementation of that layer.
-         *  @returns True if layer can be quantized.
-         */
-        virtual bool tryQuantize(const std::vector<std::vector<float> > &scales,
-                                 const std::vector<std::vector<int> > &zeropoints, LayerParams& params);
-
         /** @brief Given the @p input blobs, computes the output @p blobs.
          *  @param[in]  inputs  the input blobs.
          *  @param[out] outputs allocated output blobs, which will store results of the computation.
@@ -314,18 +313,6 @@ CV__DNN_INLINE_NS_BEGIN
          */
         virtual bool supportBackend(int backendId);  // FIXIT const
 
-        /**
-         * @brief Returns Halide backend node.
-         * @param[in] inputs Input Halide buffers.
-         * @see BackendNode, BackendWrapper
-         *
-         * Input buffers should be exactly the same that will be used in forward invocations.
-         * Despite we can use Halide::ImageParam based on input shape only,
-         * it helps prevent some memory management issues (if something wrong,
-         * Halide tests will be failed).
-         */
-        virtual Ptr<BackendNode> initHalide(const std::vector<Ptr<BackendWrapper> > &inputs);
-
         virtual Ptr<BackendNode> initNgraph(const std::vector<Ptr<BackendWrapper> > &inputs, const std::vector<Ptr<BackendNode> >& nodes);
 
         virtual Ptr<BackendNode> initVkCom(const std::vector<Ptr<BackendWrapper> > &inputs, std::vector<Ptr<BackendWrapper> > &outputs);
@@ -368,33 +355,6 @@ CV__DNN_INLINE_NS_BEGIN
         virtual Ptr<BackendNode> initCann(const std::vector<Ptr<BackendWrapper> > &inputs,
                                           const std::vector<Ptr<BackendWrapper> > &outputs,
                                           const std::vector<Ptr<BackendNode> >& nodes);
-
-       /**
-        * @brief Automatic Halide scheduling based on layer hyper-parameters.
-        * @param[in] node Backend node with Halide functions.
-        * @param[in] inputs Blobs that will be used in forward invocations.
-        * @param[in] outputs Blobs that will be used in forward invocations.
-        * @param[in] targetId Target identifier
-        * @see BackendNode, Target
-        *
-        * Layer don't use own Halide::Func members because we can have applied
-        * layers fusing. In this way the fused function should be scheduled.
-        */
-        virtual void applyHalideScheduler(Ptr<BackendNode>& node,
-                                          const std::vector<Mat*> &inputs,
-                                          const std::vector<Mat> &outputs,
-                                          int targetId) const;
-
-        /**
-         * @brief Implement layers fusing.
-         * @param[in] node Backend node of bottom layer.
-         * @see BackendNode
-         *
-         * Actual for graph-based backends. If layer attached successfully,
-         * returns non-empty cv::Ptr to node of the same backend.
-         * Fuse only over the last function.
-         */
-        virtual Ptr<BackendNode> tryAttach(const Ptr<BackendNode>& node);
 
         /**
          * @brief Tries to attach to the layer the subsequent activation layer, i.e. do the layer fusion in a partial case.
@@ -445,6 +405,12 @@ CV__DNN_INLINE_NS_BEGIN
                                      const int requiredOutputs,
                                      std::vector<MatShape> &outputs,
                                      std::vector<MatShape> &internals) const;
+
+        virtual void getTypes(const std::vector<MatType>& inputs,
+                              const int requiredOutputs,
+                              const int requiredInternals,
+                              std::vector<MatType>&outputs,
+                              std::vector<MatType>&internals) const;
 
         virtual int64 getFLOPS(const std::vector<MatShape> &inputs,
                                const std::vector<MatShape> &outputs) const {CV_UNUSED(inputs); CV_UNUSED(outputs); return 0;}
@@ -658,38 +624,6 @@ CV__DNN_INLINE_NS_BEGIN
         CV_WRAP_AS(forwardAndRetrieve) void forward(CV_OUT std::vector<std::vector<Mat> >& outputBlobs,
                                                     const std::vector<String>& outBlobNames);
 
-        /** @brief Returns a quantized Net from a floating-point Net.
-         *  @param calibData Calibration data to compute the quantization parameters.
-         *  @param inputsDtype Datatype of quantized net's inputs. Can be CV_32F or CV_8S.
-         *  @param outputsDtype Datatype of quantized net's outputs. Can be CV_32F or CV_8S.
-         *  @param perChannel Quantization granularity of quantized Net. The default is true, that means quantize model
-         *  in per-channel way (channel-wise). Set it false to quantize model in per-tensor way (or tensor-wise).
-         */
-        CV_WRAP Net quantize(InputArrayOfArrays calibData, int inputsDtype, int outputsDtype, bool perChannel=true);
-
-        /** @brief Returns input scale and zeropoint for a quantized Net.
-         *  @param scales output parameter for returning input scales.
-         *  @param zeropoints output parameter for returning input zeropoints.
-         */
-        CV_WRAP void getInputDetails(CV_OUT std::vector<float>& scales, CV_OUT std::vector<int>& zeropoints) const;
-
-        /** @brief Returns output scale and zeropoint for a quantized Net.
-         *  @param scales output parameter for returning output scales.
-         *  @param zeropoints output parameter for returning output zeropoints.
-         */
-        CV_WRAP void getOutputDetails(CV_OUT std::vector<float>& scales, CV_OUT std::vector<int>& zeropoints) const;
-
-        /**
-         * @brief Compile Halide layers.
-         * @param[in] scheduler Path to YAML file with scheduling directives.
-         * @see setPreferableBackend
-         *
-         * Schedule layers that support Halide backend. Then compile them for
-         * specific target. For layers that not represented in scheduling file
-         * or if no manual scheduling used at all, automatic scheduling will be applied.
-         */
-        CV_WRAP void setHalideScheduler(const String& scheduler);
-
         /**
          * @brief Ask network to use specific computation backend where it supported.
          * @param[in] backendId backend identifier.
@@ -703,16 +637,16 @@ CV__DNN_INLINE_NS_BEGIN
          * @see Target
          *
          * List of supported combinations backend / target:
-         * |                        | DNN_BACKEND_OPENCV | DNN_BACKEND_INFERENCE_ENGINE | DNN_BACKEND_HALIDE |  DNN_BACKEND_CUDA |
-         * |------------------------|--------------------|------------------------------|--------------------|-------------------|
-         * | DNN_TARGET_CPU         |                  + |                            + |                  + |                   |
-         * | DNN_TARGET_OPENCL      |                  + |                            + |                  + |                   |
-         * | DNN_TARGET_OPENCL_FP16 |                  + |                            + |                    |                   |
-         * | DNN_TARGET_MYRIAD      |                    |                            + |                    |                   |
-         * | DNN_TARGET_FPGA        |                    |                            + |                    |                   |
-         * | DNN_TARGET_CUDA        |                    |                              |                    |                 + |
-         * | DNN_TARGET_CUDA_FP16   |                    |                              |                    |                 + |
-         * | DNN_TARGET_HDDL        |                    |                            + |                    |                   |
+         * |                        | DNN_BACKEND_OPENCV | DNN_BACKEND_INFERENCE_ENGINE |  DNN_BACKEND_CUDA |
+         * |------------------------|--------------------|------------------------------|-------------------|
+         * | DNN_TARGET_CPU         |                  + |                            + |                   |
+         * | DNN_TARGET_OPENCL      |                  + |                            + |                   |
+         * | DNN_TARGET_OPENCL_FP16 |                  + |                            + |                   |
+         * | DNN_TARGET_MYRIAD      |                    |                            + |                   |
+         * | DNN_TARGET_FPGA        |                    |                            + |                   |
+         * | DNN_TARGET_CUDA        |                    |                              |                 + |
+         * | DNN_TARGET_CUDA_FP16   |                    |                              |                 + |
+         * | DNN_TARGET_HDDL        |                    |                            + |                   |
          */
         CV_WRAP void setPreferableTarget(int targetId);
 
@@ -764,6 +698,7 @@ CV__DNN_INLINE_NS_BEGIN
         /** @brief Returns input and output shapes for all layers in loaded model;
          *  preliminary inferencing isn't necessary.
          *  @param netInputShapes shapes for all input blobs in net input layer.
+         *  @param netInputTypes types for all input blobs in net input layer.
          *  @param layersIds output parameter for layer IDs.
          *  @param inLayersShapes output parameter for input layers shapes;
          * order is the same as in layersIds
@@ -771,12 +706,14 @@ CV__DNN_INLINE_NS_BEGIN
          * order is the same as in layersIds
          */
         CV_WRAP void getLayersShapes(const std::vector<MatShape>& netInputShapes,
+                                     const std::vector<int>& netInputTypes,
                                      CV_OUT std::vector<int>& layersIds,
                                      CV_OUT std::vector<std::vector<MatShape> >& inLayersShapes,
                                      CV_OUT std::vector<std::vector<MatShape> >& outLayersShapes) const;
 
         /** @overload */
         CV_WRAP void getLayersShapes(const MatShape& netInputShape,
+                                     const int& netInputType,
                                      CV_OUT std::vector<int>& layersIds,
                                      CV_OUT std::vector<std::vector<MatShape> >& inLayersShapes,
                                      CV_OUT std::vector<std::vector<MatShape> >& outLayersShapes) const;
@@ -784,36 +721,44 @@ CV__DNN_INLINE_NS_BEGIN
         /** @brief Returns input and output shapes for layer with specified
          * id in loaded model; preliminary inferencing isn't necessary.
          *  @param netInputShape shape input blob in net input layer.
+         *  @param netInputType input type in net input layer.
          *  @param layerId id for layer.
          *  @param inLayerShapes output parameter for input layers shapes;
          * order is the same as in layersIds
          *  @param outLayerShapes output parameter for output layers shapes;
          * order is the same as in layersIds
          */
-        void getLayerShapes(const MatShape& netInputShape,
+        CV_WRAP void getLayerShapes(const MatShape& netInputShape,
+                                    const int& netInputType,
                                     const int layerId,
                                     CV_OUT std::vector<MatShape>& inLayerShapes,
                                     CV_OUT std::vector<MatShape>& outLayerShapes) const; // FIXIT: CV_WRAP
 
         /** @overload */
         void getLayerShapes(const std::vector<MatShape>& netInputShapes,
+                                    const std::vector<int>& netInputTypes,
                                     const int layerId,
                                     CV_OUT std::vector<MatShape>& inLayerShapes,
                                     CV_OUT std::vector<MatShape>& outLayerShapes) const; // FIXIT: CV_WRAP
 
         /** @brief Computes FLOP for whole loaded model with specified input shapes.
          * @param netInputShapes vector of shapes for all net inputs.
+         * @param netInputTypes vector of types for all net inputs.
          * @returns computed FLOP.
          */
-        CV_WRAP int64 getFLOPS(const std::vector<MatShape>& netInputShapes) const;
+        CV_WRAP int64 getFLOPS(const std::vector<MatShape>& netInputShapes,
+                               const std::vector<int>& netInputTypes) const;
         /** @overload */
-        CV_WRAP int64 getFLOPS(const MatShape& netInputShape) const;
+        CV_WRAP int64 getFLOPS(const MatShape& netInputShape,
+                               const int& netInputType) const;
         /** @overload */
         CV_WRAP int64 getFLOPS(const int layerId,
-                               const std::vector<MatShape>& netInputShapes) const;
+                               const std::vector<MatShape>& netInputShapes,
+                               const std::vector<int>& netInputTypes) const;
         /** @overload */
         CV_WRAP int64 getFLOPS(const int layerId,
-                               const MatShape& netInputShape) const;
+                               const MatShape& netInputShape,
+                               const int& netInputType) const;
 
         /** @brief Returns list of types for layer used in model.
          * @param layersTypes output parameter for returning types.
@@ -829,36 +774,44 @@ CV__DNN_INLINE_NS_BEGIN
         /** @brief Computes bytes number which are required to store
          * all weights and intermediate blobs for model.
          * @param netInputShapes vector of shapes for all net inputs.
+         * @param netInputTypes vector of types for all net inputs.
          * @param weights output parameter to store resulting bytes for weights.
          * @param blobs output parameter to store resulting bytes for intermediate blobs.
          */
         void getMemoryConsumption(const std::vector<MatShape>& netInputShapes,
+                                          const std::vector<int>& netInputTypes,
                                           CV_OUT size_t& weights, CV_OUT size_t& blobs) const; // FIXIT: CV_WRAP
         /** @overload */
         CV_WRAP void getMemoryConsumption(const MatShape& netInputShape,
+                                          const int& netInputType,
                                           CV_OUT size_t& weights, CV_OUT size_t& blobs) const;
         /** @overload */
         CV_WRAP void getMemoryConsumption(const int layerId,
                                           const std::vector<MatShape>& netInputShapes,
+                                          const std::vector<int>& netInputTypes,
                                           CV_OUT size_t& weights, CV_OUT size_t& blobs) const;
         /** @overload */
         CV_WRAP void getMemoryConsumption(const int layerId,
                                           const MatShape& netInputShape,
+                                          const int& netInputType,
                                           CV_OUT size_t& weights, CV_OUT size_t& blobs) const;
 
         /** @brief Computes bytes number which are required to store
          * all weights and intermediate blobs for each layer.
          * @param netInputShapes vector of shapes for all net inputs.
+         * @param netInputTypes vector of types for all net inputs.
          * @param layerIds output vector to save layer IDs.
          * @param weights output parameter to store resulting bytes for weights.
          * @param blobs output parameter to store resulting bytes for intermediate blobs.
          */
         void getMemoryConsumption(const std::vector<MatShape>& netInputShapes,
+                                          const std::vector<int>& netInputTypes,
                                           CV_OUT std::vector<int>& layerIds,
                                           CV_OUT std::vector<size_t>& weights,
                                           CV_OUT std::vector<size_t>& blobs) const; // FIXIT: CV_WRAP
         /** @overload */
         void getMemoryConsumption(const MatShape& netInputShape,
+                                          const int& netInputType,
                                           CV_OUT std::vector<int>& layerIds,
                                           CV_OUT std::vector<size_t>& weights,
                                           CV_OUT std::vector<size_t>& blobs) const; // FIXIT: CV_WRAP
@@ -993,41 +946,12 @@ CV__DNN_INLINE_NS_BEGIN
       */
     CV_EXPORTS Net readNetFromTFLite(const char *bufferModel, size_t lenModel);
 
-    /**
-     *  @brief Reads a network model stored in <a href="http://torch.ch">Torch7</a> framework's format.
-     *  @param model    path to the file, dumped from Torch by using torch.save() function.
-     *  @param isBinary specifies whether the network was serialized in ascii mode or binary.
-     *  @param evaluate specifies testing phase of network. If true, it's similar to evaluate() method in Torch.
-     *  @returns Net object.
-     *
-     *  @note Ascii mode of Torch serializer is more preferable, because binary mode extensively use `long` type of C language,
-     *  which has various bit-length on different systems.
-     *
-     * The loading file must contain serialized <a href="https://github.com/torch/nn/blob/master/doc/module.md">nn.Module</a> object
-     * with importing network. Try to eliminate a custom objects from serialazing data to avoid importing errors.
-     *
-     * List of supported layers (i.e. object instances derived from Torch nn.Module class):
-     * - nn.Sequential
-     * - nn.Parallel
-     * - nn.Concat
-     * - nn.Linear
-     * - nn.SpatialConvolution
-     * - nn.SpatialMaxPooling, nn.SpatialAveragePooling
-     * - nn.ReLU, nn.TanH, nn.Sigmoid
-     * - nn.Reshape
-     * - nn.SoftMax, nn.LogSoftMax
-     *
-     * Also some equivalents of these classes from cunn, cudnn, and fbcunn may be successfully imported.
-     */
-     CV_EXPORTS_W Net readNetFromTorch(CV_WRAP_FILE_PATH const String &model, bool isBinary = true, bool evaluate = true);
-
      /**
       * @brief Read deep learning network represented in one of the supported formats.
       * @param[in] model Binary file contains trained weights. The following file
       *                  extensions are expected for models from different frameworks:
       *                  * `*.caffemodel` (Caffe, http://caffe.berkeleyvision.org/)
       *                  * `*.pb` (TensorFlow, https://www.tensorflow.org/)
-      *                  * `*.t7` | `*.net` (Torch, http://torch.ch/)
       *                  * `*.weights` (Darknet, https://pjreddie.com/darknet/)
       *                  * `*.bin` | `*.onnx` (OpenVINO, https://software.intel.com/openvino-toolkit)
       *                  * `*.onnx` (ONNX, https://onnx.ai/)
@@ -1041,8 +965,8 @@ CV__DNN_INLINE_NS_BEGIN
       * @returns Net object.
       *
       * This function automatically detects an origin framework of trained model
-      * and calls an appropriate function such @ref readNetFromCaffe, @ref readNetFromTensorflow,
-      * @ref readNetFromTorch or @ref readNetFromDarknet. An order of @p model and @p config
+      * and calls an appropriate function such @ref readNetFromCaffe, @ref readNetFromTensorflow
+      * or @ref readNetFromDarknet. An order of @p model and @p config
       * arguments does not matter.
       */
      CV_EXPORTS_W Net readNet(CV_WRAP_FILE_PATH const String& model, CV_WRAP_FILE_PATH const String& config = "", const String& framework = "");
@@ -1058,11 +982,6 @@ CV__DNN_INLINE_NS_BEGIN
       */
      CV_EXPORTS_W Net readNet(const String& framework, const std::vector<uchar>& bufferModel,
                               const std::vector<uchar>& bufferConfig = std::vector<uchar>());
-
-    /** @brief Loads blob which was serialized as torch.Tensor object of Torch7 framework.
-     *  @warning This function has the same limitations as readNetFromTorch().
-     */
-    CV_EXPORTS_W Mat readTorchBlob(const String &filename, bool isBinary = true);
 
     /** @brief Load a network from Intel's Model Optimizer intermediate representation.
      *  @param[in] xml XML configuration file with network's topology.

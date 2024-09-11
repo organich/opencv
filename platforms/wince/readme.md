@@ -22,7 +22,7 @@ For headless WEC2013, this configuration may not be limited to but is known to w
 ```
 -DBUILD_EXAMPLES=OFF `
 -DBUILD_opencv_apps=OFF `
--DBUILD_opencv_calib3d=OFF `
+-DBUILD_opencv_3d=OFF `
 -DBUILD_opencv_highgui=OFF `
 -DBUILD_opencv_features2d=OFF `
 -DBUILD_opencv_flann=OFF `
@@ -38,7 +38,6 @@ For headless WEC2013, this configuration may not be limited to but is known to w
 -DBUILD_opencv_videostab=OFF `
 -DBUILD_opencv_dnn=OFF `
 -DBUILD_opencv_java=OFF `
--DBUILD_opencv_python2=OFF `
 -DBUILD_opencv_python3=OFF `
 -DBUILD_opencv_java_bindings_generator=OFF `
 -DBUILD_opencv_python_bindings_generator=OFF `

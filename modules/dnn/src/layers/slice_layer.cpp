@@ -280,6 +280,25 @@ public:
         return false;
     }
 
+    void getTypes(const std::vector<MatType>& inputs,
+        const int requiredOutputs,
+        const int requiredInternals,
+        std::vector<MatType>& outputs,
+        std::vector<MatType>& internals) const CV_OVERRIDE
+    {
+        CV_CheckEQ(inputs.size(), (size_t)1, "");
+        for (auto input : inputs)
+        {
+            if (preferableTarget == DNN_TARGET_OPENCL_FP16)
+                CV_CheckType(input, input == CV_16F || input == CV_8S || input == CV_8U || input == CV_32S || input == CV_64S || input == CV_Bool, "");
+            else
+                CV_CheckType(input, input == CV_32F || input == CV_8S || input == CV_8U || input == CV_32S || input == CV_64S || input == CV_Bool, "");
+        }
+
+        outputs.assign(requiredOutputs, inputs[0]);
+    }
+
+
     bool updateMemoryShapes(const std::vector<MatShape> &inputs) CV_OVERRIDE
     {
         shapesInitialized = true;
@@ -598,12 +617,12 @@ public:
         CV_TRACE_FUNCTION();
         CV_TRACE_ARG_VALUE(name, "name", name.c_str());
 
-        CV_OCL_RUN(IS_DNN_OPENCL_TARGET(preferableTarget),
-                   forward_ocl(inputs_arr, outputs_arr, internals_arr))
-
         std::vector<Mat> inputs, outputs;
         inputs_arr.getMatVector(inputs);
         outputs_arr.getMatVector(outputs);
+
+        CV_OCL_RUN(IS_DNN_OPENCL_TARGET(preferableTarget),
+                   forward_ocl(inputs_arr, outputs_arr, internals_arr))
 
         const Mat& inpMat = inputs[0];
         CV_Assert(outputs.size() == finalSliceRanges.size());
@@ -625,10 +644,18 @@ public:
             {
                 std::vector<int> inpIdx(dimsNum, 0);
                 std::vector<int> outIdx(dimsNum, 0);
-                if (inpMat.type() == CV_16F)
+                if (inpMat.type() == CV_32S)
+                    getSliceRecursive<int32_t>(inpMat, inpIdx, finalSliceRanges[i], sliceSteps[i], 0, dimsNum, outputs[i], outIdx);
+                else if (inpMat.type() == CV_64S)
+                    getSliceRecursive<int64_t>(inpMat, inpIdx, finalSliceRanges[i], sliceSteps[i], 0, dimsNum, outputs[i], outIdx);
+                else if (inpMat.type() == CV_16F)
                     getSliceRecursive<int16_t>(inpMat, inpIdx, finalSliceRanges[i], sliceSteps[i], 0, dimsNum, outputs[i], outIdx);
                 else if (inpMat.type() == CV_8S)
                     getSliceRecursive<int8_t>(inpMat, inpIdx, finalSliceRanges[i], sliceSteps[i], 0, dimsNum, outputs[i], outIdx);
+                else if (inpMat.type() == CV_8U)
+                    getSliceRecursive<uint8_t>(inpMat, inpIdx, finalSliceRanges[i], sliceSteps[i], 0, dimsNum, outputs[i], outIdx);
+                else if (inpMat.type() == CV_Bool)
+                    getSliceRecursive<bool>(inpMat, inpIdx, finalSliceRanges[i], sliceSteps[i], 0, dimsNum, outputs[i], outIdx);
                 else
                     getSliceRecursive<float>(inpMat, inpIdx, finalSliceRanges[i], sliceSteps[i], 0, dimsNum, outputs[i], outIdx);
                 // flip for negative steps
@@ -804,22 +831,12 @@ public:
                 offsets_i.push_back(range.start);
             offsets.push_back(std::move(offsets_i));
         }
-
-        return make_cuda_node<cuda4dnn::SliceOp>(preferableTarget, std::move(context->stream), std::move(offsets));
+        if (inputs[0]->getHostMatDepth() == CV_Bool)
+            return make_cuda_node_bool<cuda4dnn::SliceOp>(std::move(context->stream), std::move(offsets));
+        else
+            return make_cuda_node_with_type<cuda4dnn::SliceOp>(preferableTarget, inputs[0]->getHostMatDepth(), std::move(context->stream), std::move(offsets));
     }
 #endif
-
-    virtual bool tryQuantize(const std::vector<std::vector<float> > &scales,
-                             const std::vector<std::vector<int> > &zeropoints, LayerParams& params) CV_OVERRIDE
-    {
-        const int numOutputs = scales[1].size();
-        for (int i = 0; i < numOutputs; i++)
-        {
-            if (scales[1][i] != scales[0][0])
-             return false;
-        }
-        return true;
-    }
 
 private:
     template <typename T>
@@ -890,6 +907,24 @@ public:
         }
         outputs.resize(1, dstShape);
         return false;
+    }
+
+    void getTypes(const std::vector<MatType>& inputs,
+        const int requiredOutputs,
+        const int requiredInternals,
+        std::vector<MatType>& outputs,
+        std::vector<MatType>& internals) const CV_OVERRIDE
+    {
+        CV_CheckEQ(inputs.size(), (size_t)2, "");
+        for (auto input : inputs)
+        {
+            if (preferableTarget == DNN_TARGET_OPENCL_FP16)
+                CV_CheckType(input, input == CV_16F || input == CV_8S || input == CV_8U || input == CV_32S || input == CV_64S || input == CV_Bool, "");
+            else
+                CV_CheckType(input, input == CV_32F || input == CV_8S || input == CV_8U || input == CV_32S || input == CV_64S || input == CV_Bool, "");
+        }
+
+        outputs.assign(requiredOutputs, inputs[0]);
     }
 
     void finalize(InputArrayOfArrays inputs_arr, OutputArrayOfArrays) CV_OVERRIDE

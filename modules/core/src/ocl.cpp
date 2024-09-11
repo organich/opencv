@@ -223,7 +223,7 @@ static const bool CV_OPENCL_VALIDATE_BINARY_PROGRAMS_VALUE = utils::getConfigura
 
 // Option to disable calls clEnqueueReadBufferRect / clEnqueueWriteBufferRect / clEnqueueCopyBufferRect
 static const bool CV_OPENCL_DISABLE_BUFFER_RECT_OPERATIONS = utils::getConfigurationParameterBool("OPENCV_OPENCL_DISABLE_BUFFER_RECT_OPERATIONS",
-#ifdef __APPLE__
+#if 1 //def __APPLE__
         true
 #else
         false
@@ -2372,7 +2372,7 @@ class OpenCLSVMBufferPoolImpl;
 
 struct Context::Impl
 {
-    static Context::Impl* get(Context& context) { return context.p; }
+    static Context::Impl* get(Context& context) { return context.getImpl(); }
 
     typedef std::deque<Context::Impl*> container_t;
     static container_t& getGlobalContainer()
@@ -3005,7 +3005,7 @@ Device& Context::device(size_t idx) const
     return !p || idx >= p->devices.size() ? dummy : p->devices[idx];
 }
 
-Context& Context::getDefault(bool initialize)
+Context& Context::getDefault()
 {
     auto& c = OpenCLExecutionContext::getCurrent();
     if (!c.empty())
@@ -3014,7 +3014,6 @@ Context& Context::getDefault(bool initialize)
         return ctx;
     }
 
-    CV_UNUSED(initialize);
     static Context dummy;
     return dummy;
 }
@@ -3105,7 +3104,7 @@ namespace svm {
 
 const SVMCapabilities getSVMCapabilitites(const ocl::Context& context)
 {
-    Context::Impl* i = context.p;
+    Context::Impl* i = context.getImpl();
     CV_Assert(i);
     if (!i->svmInitialized)
         i->svmInit();
@@ -3114,7 +3113,7 @@ const SVMCapabilities getSVMCapabilitites(const ocl::Context& context)
 
 CV_EXPORTS const SVMFunctions* getSVMFunctions(const ocl::Context& context)
 {
-    Context::Impl* i = context.p;
+    Context::Impl* i = context.getImpl();
     CV_Assert(i);
     CV_Assert(i->svmInitialized); // getSVMCapabilitites() must be called first
     CV_Assert(i->svmFunctions.fn_clSVMAlloc != NULL);
@@ -3884,18 +3883,6 @@ bool Kernel::run_(int dims, size_t _globalsize[], size_t _localsize[],
 }
 
 
-static bool isRaiseErrorOnReuseAsyncKernel()
-{
-    static bool initialized = false;
-    static bool value = false;
-    if (!initialized)
-    {
-        value = cv::utils::getConfigurationParameterBool("OPENCV_OPENCL_RAISE_ERROR_REUSE_ASYNC_KERNEL", false);
-        initialized = true;
-    }
-    return value;
-}
-
 bool Kernel::Impl::run(int dims, size_t globalsize[], size_t localsize[],
         bool sync, int64* timeNS, const Queue& q)
 {
@@ -3909,19 +3896,13 @@ bool Kernel::Impl::run(int dims, size_t globalsize[], size_t localsize[],
 
     if (isAsyncRun)
     {
-        CV_LOG_ERROR(NULL, "OpenCL kernel can't be reused in async mode: " << name);
-        if (isRaiseErrorOnReuseAsyncKernel())
-            CV_Assert(0);
-        return false;  // OpenCV 5.0: raise error
+        CV_Error_(Error::StsError, ("OpenCL kernel can't be reused in async mode: %s", name.c_str()));
     }
     isAsyncRun = !sync;
 
     if (isInProgress)
     {
-        CV_LOG_ERROR(NULL, "Previous OpenCL kernel launch is not finished: " << name);
-        if (isRaiseErrorOnReuseAsyncKernel())
-            CV_Assert(0);
-        return false;  // OpenCV 5.0: raise error
+        CV_Error_(Error::StsError, ("Previous OpenCL kernel launch is not finished: %s", name.c_str()));
     }
 
 #if CV_OPENCL_SYNC_RUN_KERNELS
@@ -6998,7 +6979,11 @@ const char* typeToStr(int type)
         "float", "float2", "float3", "float4", 0, 0, 0, "float8", 0, 0, 0, 0, 0, 0, 0, "float16",
         "double", "double2", "double3", "double4", 0, 0, 0, "double8", 0, 0, 0, 0, 0, 0, 0, "double16",
         "half", "half2", "half3", "half4", 0, 0, 0, "half8", 0, 0, 0, 0, 0, 0, 0, "half16",
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CV_16BF
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CV_Bool
+        "ulong", "ulong2", "ulong3", "ulong4", 0, 0, 0, "ulong8", 0, 0, 0, 0, 0, 0, 0, "ulong16",
+        "long", "long2", "long3", "long4", 0, 0, 0, "long8", 0, 0, 0, 0, 0, 0, 0, "long16",
+        "uint", "uint2", "uint3", "uint4", 0, 0, 0, "uint8", 0, 0, 0, 0, 0, 0, 0, "uint16"
     };
     int cn = CV_MAT_CN(type), depth = CV_MAT_DEPTH(type);
     const char* result = cn > 16 ? nullptr : tab[depth*16 + cn-1];

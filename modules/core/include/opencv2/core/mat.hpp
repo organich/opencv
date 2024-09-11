@@ -171,9 +171,6 @@ public:
         STD_VECTOR        = 3 << KIND_SHIFT,
         STD_VECTOR_VECTOR = 4 << KIND_SHIFT,
         STD_VECTOR_MAT    = 5 << KIND_SHIFT,
-#if OPENCV_ABI_COMPATIBILITY < 500
-        EXPR              = 6 << KIND_SHIFT,  //!< removed: https://github.com/opencv/opencv/pull/17046
-#endif
         OPENGL_BUFFER     = 7 << KIND_SHIFT,
         CUDA_HOST_MEM     = 8 << KIND_SHIFT,
         CUDA_GPU_MAT      = 9 << KIND_SHIFT,
@@ -181,9 +178,6 @@ public:
         STD_VECTOR_UMAT   =11 << KIND_SHIFT,
         STD_BOOL_VECTOR   =12 << KIND_SHIFT,
         STD_VECTOR_CUDA_GPU_MAT = 13 << KIND_SHIFT,
-#if OPENCV_ABI_COMPATIBILITY < 500
-        STD_ARRAY         =14 << KIND_SHIFT,  //!< removed: https://github.com/opencv/opencv/issues/18897
-#endif
         STD_ARRAY_MAT     =15 << KIND_SHIFT
     };
 
@@ -250,6 +244,7 @@ public:
     bool isUMat() const;
     bool isMatVector() const;
     bool isUMatVector() const;
+    bool isVecVector() const;
     bool isMatx() const;
     bool isVector() const;
     bool isGpuMat() const;
@@ -305,9 +300,14 @@ public:
         DEPTH_MASK_32F = 1 << CV_32F,
         DEPTH_MASK_64F = 1 << CV_64F,
         DEPTH_MASK_16F = 1 << CV_16F,
-        DEPTH_MASK_ALL = (DEPTH_MASK_64F<<1)-1,
+        DEPTH_MASK_16BF = 1 << CV_16BF,
+        DEPTH_MASK_BOOL = 1 << CV_Bool,
+        DEPTH_MASK_64U = 1 << CV_64U,
+        DEPTH_MASK_64S = 1 << CV_64S,
+        DEPTH_MASK_32U = 1 << CV_32U,
+        DEPTH_MASK_ALL = (1 << CV_DEPTH_CURR_MAX)-1,
         DEPTH_MASK_ALL_BUT_8S = DEPTH_MASK_ALL & ~DEPTH_MASK_8S,
-        DEPTH_MASK_ALL_16F = (DEPTH_MASK_16F<<1)-1,
+        DEPTH_MASK_ALL_16F = DEPTH_MASK_ALL,
         DEPTH_MASK_FLT = DEPTH_MASK_32F + DEPTH_MASK_64F
     };
 
@@ -362,6 +362,9 @@ public:
     UMat& getUMatRef(int i=-1) const;
     cuda::GpuMat& getGpuMatRef() const;
     std::vector<cuda::GpuMat>& getGpuMatVecRef() const;
+    std::vector<Mat>& getMatVecRef() const;
+    std::vector<UMat>& getUMatVecRef() const;
+    template<typename _Tp> std::vector<std::vector<_Tp> >& getVecVecRef() const;
     ogl::Buffer& getOGlBufferRef() const;
     cuda::HostMem& getHostMemRef() const;
     void create(Size sz, int type, int i=-1, bool allowTransposed=false, _OutputArray::DepthMask fixedDepthMask=static_cast<_OutputArray::DepthMask>(0)) const;
@@ -371,6 +374,7 @@ public:
     void release() const;
     void clear() const;
     void setTo(const _InputArray& value, const _InputArray & mask = _InputArray()) const;
+    void setZero() const;
 
     void assign(const UMat& u) const;
     void assign(const Mat& m) const;
@@ -608,7 +612,7 @@ struct CV_EXPORTS MatStep
     MatStep& operator = (size_t s);
 
     size_t* p;
-    size_t buf[2];
+    size_t buf[3];
 protected:
     MatStep& operator = (const MatStep&);
 };
@@ -1228,7 +1232,8 @@ public:
     @param m Destination matrix. If it does not have a proper size or type before the operation, it is
     reallocated.
     @param mask Operation mask of the same size as \*this. Its non-zero elements indicate which matrix
-    elements need to be copied. The mask has to be of type CV_8U and can have 1 or multiple channels.
+    elements need to be copied. The mask has to be of type CV_8U, CV_8S or CV_Bool and can have 1 or
+    multiple channels.
     */
     void copyTo( OutputArray m, InputArray mask ) const;
 
@@ -1265,9 +1270,14 @@ public:
     This is an advanced variant of the Mat::operator=(const Scalar& s) operator.
     @param value Assigned scalar converted to the actual array type.
     @param mask Operation mask of the same size as \*this. Its non-zero elements indicate which matrix
-    elements need to be copied. The mask has to be of type CV_8U and can have 1 or multiple channels
+    elements need to be copied. The mask has to be of type CV_8U, CV_8S or CV_Bool and can have 1 or
+    multiple channels.
      */
     Mat& setTo(InputArray value, InputArray mask=noArray());
+
+    /** @brief Sets all the array elements to 0.
+     */
+    Mat& setZero();
 
     /** @brief Changes the shape and/or the number of channels of a 2D matrix without copying the data.
 
@@ -1511,6 +1521,15 @@ public:
     @param type New matrix type.
     */
     void create(const std::vector<int>& sizes, int type);
+
+    /** @brief Creates the matrix of the same size as another array.
+
+    The method is similar to _OutputArray::createSameSize(arr, type),
+    but is applied to Mat.
+    @param arr The other array.
+    @param type New matrix type.
+    */
+    void createSameSize(InputArray arr, int type);
 
     /** @brief Increments the reference counter.
 
@@ -2136,6 +2155,7 @@ public:
     int dims;
     //! the number of rows and columns or (-1, -1) when the matrix has more than 2 dimensions
     int rows, cols;
+    int dummy = 153;
     //! pointer to the data
     uchar* data;
 
@@ -2309,6 +2329,8 @@ public:
     void create(Size _size);
     //! equivalent to Mat::create(_ndims, _sizes, DatType<_Tp>::type)
     void create(int _ndims, const int* _sizes);
+    //! equivalent to Mat::create(arr.ndims, arr.size.p, DatType<_Tp>::type)
+    void createSameSize(InputArray arr);
     //! equivalent to Mat::release()
     void release();
     //! cross-product
@@ -2455,10 +2477,6 @@ public:
     UMat(const UMat& m, const Range* ranges);
     UMat(const UMat& m, const std::vector<Range>& ranges);
 
-    // FIXIT copyData=false is not implemented, drop this in favor of cv::Mat (OpenCV 5.0)
-    //! builds matrix from std::vector with or without copying the data
-    template<typename _Tp> explicit UMat(const std::vector<_Tp>& vec, bool copyData=false);
-
     //! destructor - calls release()
     ~UMat();
     //! assignment operators
@@ -2482,8 +2500,7 @@ public:
     //!  <0 - a diagonal from the lower half)
     UMat diag(int d=0) const;
     //! constructs a square diagonal matrix which main diagonal is vector "d"
-    CV_NODISCARD_STD static UMat diag(const UMat& d, UMatUsageFlags usageFlags /*= USAGE_DEFAULT*/);
-    CV_NODISCARD_STD static UMat diag(const UMat& d) { return diag(d, USAGE_DEFAULT); }  // OpenCV 5.0: remove abi compatibility overload
+    CV_NODISCARD_STD static UMat diag(const UMat& d, UMatUsageFlags usageFlags = USAGE_DEFAULT);
 
     //! returns deep copy of the matrix, i.e. the data is copied
     CV_NODISCARD_STD UMat clone() const;
@@ -2517,22 +2534,14 @@ public:
     double dot(InputArray m) const;
 
     //! Matlab-style matrix initialization
-    CV_NODISCARD_STD static UMat zeros(int rows, int cols, int type, UMatUsageFlags usageFlags /*= USAGE_DEFAULT*/);
-    CV_NODISCARD_STD static UMat zeros(Size size, int type, UMatUsageFlags usageFlags /*= USAGE_DEFAULT*/);
-    CV_NODISCARD_STD static UMat zeros(int ndims, const int* sz, int type, UMatUsageFlags usageFlags /*= USAGE_DEFAULT*/);
-    CV_NODISCARD_STD static UMat zeros(int rows, int cols, int type) { return zeros(rows, cols, type, USAGE_DEFAULT); }  // OpenCV 5.0: remove abi compatibility overload
-    CV_NODISCARD_STD static UMat zeros(Size size, int type) { return zeros(size, type, USAGE_DEFAULT); }  // OpenCV 5.0: remove abi compatibility overload
-    CV_NODISCARD_STD static UMat zeros(int ndims, const int* sz, int type) { return zeros(ndims, sz, type, USAGE_DEFAULT); }  // OpenCV 5.0: remove abi compatibility overload
-    CV_NODISCARD_STD static UMat ones(int rows, int cols, int type, UMatUsageFlags usageFlags /*= USAGE_DEFAULT*/);
-    CV_NODISCARD_STD static UMat ones(Size size, int type, UMatUsageFlags usageFlags /*= USAGE_DEFAULT*/);
-    CV_NODISCARD_STD static UMat ones(int ndims, const int* sz, int type, UMatUsageFlags usageFlags /*= USAGE_DEFAULT*/);
-    CV_NODISCARD_STD static UMat ones(int rows, int cols, int type) { return ones(rows, cols, type, USAGE_DEFAULT); }  // OpenCV 5.0: remove abi compatibility overload
-    CV_NODISCARD_STD static UMat ones(Size size, int type) { return ones(size, type, USAGE_DEFAULT); }  // OpenCV 5.0: remove abi compatibility overload
-    CV_NODISCARD_STD static UMat ones(int ndims, const int* sz, int type) { return ones(ndims, sz, type, USAGE_DEFAULT); }  // OpenCV 5.0: remove abi compatibility overload
-    CV_NODISCARD_STD static UMat eye(int rows, int cols, int type, UMatUsageFlags usageFlags /*= USAGE_DEFAULT*/);
-    CV_NODISCARD_STD static UMat eye(Size size, int type, UMatUsageFlags usageFlags /*= USAGE_DEFAULT*/);
-    CV_NODISCARD_STD static UMat eye(int rows, int cols, int type) { return eye(rows, cols, type, USAGE_DEFAULT); }  // OpenCV 5.0: remove abi compatibility overload
-    CV_NODISCARD_STD static UMat eye(Size size, int type) { return eye(size, type, USAGE_DEFAULT); }  // OpenCV 5.0: remove abi compatibility overload
+    CV_NODISCARD_STD static UMat zeros(int rows, int cols, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
+    CV_NODISCARD_STD static UMat zeros(Size size, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
+    CV_NODISCARD_STD static UMat zeros(int ndims, const int* sz, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
+    CV_NODISCARD_STD static UMat ones(int rows, int cols, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
+    CV_NODISCARD_STD static UMat ones(Size size, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
+    CV_NODISCARD_STD static UMat ones(int ndims, const int* sz, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
+    CV_NODISCARD_STD static UMat eye(int rows, int cols, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
+    CV_NODISCARD_STD static UMat eye(Size size, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
 
     //! allocates new matrix data unless the matrix already has specified size and type.
     // previous data is unreferenced if needed.
@@ -2540,6 +2549,10 @@ public:
     void create(Size size, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
     void create(int ndims, const int* sizes, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
     void create(const std::vector<int>& sizes, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
+
+    //! allocates new matrix data unless the matrix already has specified size and type.
+    // the size is taken from the specified array.
+    void createSameSize(InputArray arr, int type, UMatUsageFlags usageFlags = USAGE_DEFAULT);
 
     //! increases the reference counter; use with care to avoid memleaks
     void addref();
@@ -2993,7 +3006,6 @@ public:
     int flags;
     Hdr* hdr;
 };
-
 
 
 ///////////////////////////////// SparseMat_<_Tp> ////////////////////////////////////

@@ -485,7 +485,8 @@ bool CV_OperationsTest::TestSubMatAccess()
             coords.push_back(T_bs(i));
             //std::cout << T_bs1(i) << std::endl;
         }
-        CV_Assert( cvtest::norm(coords, T_bs.reshape(1,1), NORM_INF) == 0 );
+        int sz=(int)T_bs.total();
+        CV_Assert( cvtest::norm(coords, T_bs.reshape(1,1,&sz), NORM_INF) == 0 );
     }
     catch (const test_excep& e)
     {
@@ -773,14 +774,14 @@ bool CV_OperationsTest::TestTemplateMat()
         mvf.push_back(Mat_<float>::zeros(4, 3));
         merge(mvf, mf2);
         split(mf2, mvf2);
-        CV_Assert( cvtest::norm(mvf2[0], mvf[0], CV_C) == 0 &&
-                  cvtest::norm(mvf2[1], mvf[1], CV_C) == 0 );
+        CV_Assert( cvtest::norm(mvf2[0], mvf[0], NORM_INF) == 0 &&
+                  cvtest::norm(mvf2[1], mvf[1], NORM_INF) == 0 );
 
         {
         Mat a(2,2,CV_32F,1.f);
         Mat b(1,2,CV_32F,1.f);
         Mat c = (a*b.t()).t();
-        CV_Assert( cvtest::norm(c, CV_L1) == 4. );
+        CV_Assert( cvtest::norm(c, NORM_L1) == 4. );
         }
 
         bool badarg_catched = false;
@@ -1086,7 +1087,6 @@ bool CV_OperationsTest::operations1()
         Size sz(10, 20);
         if (sz.area() != 200) throw test_excep();
         if (sz.width != 10 || sz.height != 20) throw test_excep();
-        if (cvSize(sz).width != 10 || cvSize(sz).height != 20) throw test_excep();
 
         Rect r1(0, 0, 10, 20);
         Size sz1(5, 10);
@@ -1130,13 +1130,13 @@ bool CV_OperationsTest::operations1()
         Matx33f b(1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f, 9.f);
         Mat c;
         cv::add(Mat::zeros(3, 3, CV_32F), b, c);
-        CV_Assert( cvtest::norm(b, c, CV_C) == 0 );
+        CV_Assert( cvtest::norm(b, c, NORM_INF) == 0 );
 
         cv::add(Mat::zeros(3, 3, CV_64F), b, c, noArray(), c.type());
-        CV_Assert( cvtest::norm(b, c, CV_C) == 0 );
+        CV_Assert( cvtest::norm(b, c, NORM_INF) == 0 );
 
         cv::add(Mat::zeros(6, 1, CV_64F), 1, c, noArray(), c.type());
-        CV_Assert( cvtest::norm(Matx61f(1.f, 1.f, 1.f, 1.f, 1.f, 1.f), c, CV_C) == 0 );
+        CV_Assert( cvtest::norm(Matx61f(1.f, 1.f, 1.f, 1.f, 1.f, 1.f), c, NORM_INF) == 0 );
 
         vector<Point2f> pt2d(3);
         vector<Point3d> pt3d(2);
@@ -1182,11 +1182,11 @@ bool CV_OperationsTest::TestSVD()
         Mat A = (Mat_<double>(3,4) << 1, 2, -1, 4, 2, 4, 3, 5, -1, -2, 6, 7);
         Mat x;
         SVD::solveZ(A,x);
-        if( cvtest::norm(A*x, CV_C) > FLT_EPSILON )
+        if( cvtest::norm(A*x, NORM_INF) > FLT_EPSILON )
             throw test_excep();
 
         SVD svd(A, SVD::FULL_UV);
-        if( cvtest::norm(A*svd.vt.row(3).t(), CV_C) > FLT_EPSILON )
+        if( cvtest::norm(A*svd.vt.row(3).t(), NORM_INF) > FLT_EPSILON )
             throw test_excep();
 
         Mat Dp(3,3,CV_32FC1);
@@ -1210,11 +1210,11 @@ bool CV_OperationsTest::TestSVD()
         W=decomp.w;
         Mat I = Mat::eye(3, 3, CV_32F);
 
-        if( cvtest::norm(U*U.t(), I, CV_C) > FLT_EPSILON ||
-            cvtest::norm(Vt*Vt.t(), I, CV_C) > FLT_EPSILON ||
+        if( cvtest::norm(U*U.t(), I, NORM_INF) > FLT_EPSILON ||
+            cvtest::norm(Vt*Vt.t(), I, NORM_INF) > FLT_EPSILON ||
             W.at<float>(2) < 0 || W.at<float>(1) < W.at<float>(2) ||
             W.at<float>(0) < W.at<float>(1) ||
-            cvtest::norm(U*Mat::diag(W)*Vt, Q, CV_C) > FLT_EPSILON )
+            cvtest::norm(U*Mat::diag(W)*Vt, Q, NORM_INF) > FLT_EPSILON )
             throw test_excep();
     }
     catch(const test_excep&)
@@ -1518,7 +1518,7 @@ TEST(Core_sortIdx, regression_8941)
     );
 
     cv::Mat result;
-    cv::sortIdx(src.col(0), result, CV_SORT_EVERY_COLUMN | CV_SORT_ASCENDING);
+    cv::sortIdx(src.col(0), result, cv::SORT_EVERY_COLUMN | cv::SORT_ASCENDING);
 #if 0
     std::cout << src.col(0) << std::endl;
     std::cout << result << std::endl;
@@ -1599,7 +1599,7 @@ TEST_P(Core_Arith_Regression24163, test_for_ties_to_even)
 
     const int rounding = fegetround();
     fesetround(FE_TONEAREST);
-    const int mean = lrint( static_cast<double>(alpha + beta) / 2.0 );
+    const int mean = (int)lrint( static_cast<double>(alpha + beta) / 2.0 );
     fesetround(rounding);
 
     const Mat expected(matSize, matType, Scalar::all(mean));

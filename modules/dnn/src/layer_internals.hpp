@@ -134,7 +134,8 @@ struct DataLayer : public Layer
 
     virtual bool supportBackend(int backendId) CV_OVERRIDE
     {
-        return backendId == DNN_BACKEND_OPENCV;
+        return backendId == DNN_BACKEND_OPENCV ||
+               backendId == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH;
     }
 
     void forward(InputArrayOfArrays inputs_arr, OutputArrayOfArrays outputs_arr, OutputArrayOfArrays internals_arr) CV_OVERRIDE
@@ -146,14 +147,20 @@ struct DataLayer : public Layer
         CV_OCL_RUN(IS_DNN_OPENCL_TARGET(preferableTarget),
                 forward_ocl(inputs_arr, outputs_arr, internals_arr))
 
-        bool isFP16 = outputs_arr.depth() == CV_16F;
-
         std::vector<Mat> outputs, internals;
         outputs_arr.getMatVector(outputs);
         internals_arr.getMatVector(internals);
 
         for (int i = 0; i < inputsData.size(); ++i)
         {
+            bool isFP16 = outputs[i].depth() == CV_16F;
+            if (inputsData[i].type() != CV_32F)
+            {
+                CV_CheckTypeEQ(outputs[i].type(), inputsData[i].type(), "");
+                CV_CheckTrue(means[i] == Scalar() && scaleFactors[i] == 1.0, "Input mean and scale are supported only for float32 input");
+                inputsData[i].copyTo(outputs[i]);
+                continue;
+            }
             double scale = scaleFactors[i];
             Scalar& mean = means[i];
 
@@ -209,13 +216,19 @@ struct DataLayer : public Layer
 #ifdef HAVE_OPENCL
     bool forward_ocl(InputArrayOfArrays, OutputArrayOfArrays outputs_, OutputArrayOfArrays internals_)
     {
-        bool isFP16 = outputs_.depth() == CV_16F;
-
         std::vector<UMat> outputs;
         outputs_.getUMatVector(outputs);
 
         for (int i = 0; i < inputsData.size(); ++i)
         {
+            bool isFP16 = outputs[i].depth() == CV_16F;
+            if (inputsData[i].type() != CV_32F)
+            {
+                CV_CheckTypeEQ(outputs[i].type(), inputsData[i].type(), "");
+                CV_CheckTrue(means[i] == Scalar() && scaleFactors[i] == 1.0, "Input mean and scale are supported only for float32 input");
+                inputsData[i].copyTo(outputs[i]);
+                continue;
+            }
             Mat inputData = inputsData[i];
 
             double scale = scaleFactors[i];
@@ -228,9 +241,12 @@ struct DataLayer : public Layer
                 CV_CheckTypeEQ(outputs[i].type(), CV_32FC1, "");
 
             bool singleMean = true;
-            for (int j = 1; j < std::min(4, inputData.size[1]) && singleMean; ++j)
+            if (mean != Scalar())
             {
-                singleMean = mean[j] == mean[j - 1];
+                for (int j = 1; j < std::min(4, inputData.size[1]) && singleMean; ++j)
+                {
+                    singleMean = mean[j] == mean[j - 1];
+                }
             }
 
             if (singleMean)
@@ -309,6 +325,16 @@ struct DataLayer : public Layer
         CV_Assert(inputs.size() == requiredOutputs);
         outputs.assign(inputs.begin(), inputs.end());
         return false;
+    }
+
+    void getTypes(const std::vector<MatType>& inputs,
+        const int requiredOutputs,
+        const int requiredInternals,
+        std::vector<MatType>& outputs,
+        std::vector<MatType>& internals) const CV_OVERRIDE
+    {
+        CV_Assert(inputs.size());
+        outputs = inputs;
     }
 
     virtual void finalize(InputArrayOfArrays, OutputArrayOfArrays outputs_arr) CV_OVERRIDE

@@ -53,7 +53,6 @@
 #include "opencv2/core/hal/intrin.hpp"
 #include "opencv2/core/utils/buffer_area.private.hpp"
 
-#include "opencv2/core/openvx/ovx_defs.hpp"
 #include "resize.hpp"
 
 #include "opencv2/core/softfloat.hpp"
@@ -3846,7 +3845,7 @@ void resize(int src_type,
 
     CV_IPP_RUN_FAST(ipp_resize(src_data, src_step, src_width, src_height, dst_data, dst_step, dsize.width, dsize.height, inv_scale_x, inv_scale_y, depth, cn, interpolation))
 
-    static ResizeFunc linear_tab[] =
+    static ResizeFunc linear_tab[CV_DEPTH_MAX] =
     {
         resizeGeneric_<
             HResizeLinear<uchar, int, short,
@@ -3880,7 +3879,7 @@ void resize(int src_type,
         0
     };
 
-    static ResizeFunc cubic_tab[] =
+    static ResizeFunc cubic_tab[CV_DEPTH_MAX] =
     {
         resizeGeneric_<
             HResizeCubic<uchar, int, short>,
@@ -3908,7 +3907,7 @@ void resize(int src_type,
         0
     };
 
-    static ResizeFunc lanczos4_tab[] =
+    static ResizeFunc lanczos4_tab[CV_DEPTH_MAX] =
     {
         resizeGeneric_<HResizeLanczos4<uchar, int, short>,
             VResizeLanczos4<uchar, int, short,
@@ -3931,7 +3930,7 @@ void resize(int src_type,
         0
     };
 
-    static ResizeAreaFastFunc areafast_tab[] =
+    static ResizeAreaFastFunc areafast_tab[CV_DEPTH_MAX] =
     {
         resizeAreaFast_<uchar, int, ResizeAreaFastVec<uchar, ResizeAreaFastVec_SIMD_8u> >,
         0,
@@ -3943,14 +3942,14 @@ void resize(int src_type,
         0
     };
 
-    static ResizeAreaFunc area_tab[] =
+    static ResizeAreaFunc area_tab[CV_DEPTH_MAX] =
     {
         resizeArea_<uchar, float>, 0, resizeArea_<ushort, float>,
         resizeArea_<short, float>, 0, resizeArea_<float, float>,
         resizeArea_<double, double>, 0
     };
 
-    static be_resize_func linear_exact_tab[] =
+    static be_resize_func linear_exact_tab[CV_DEPTH_MAX] =
     {
         resize_bitExact<uchar, interpolationLinear<uchar> >,
         resize_bitExact<schar, interpolationLinear<schar> >,
@@ -4244,15 +4243,3 @@ void cv::resize( InputArray _src, OutputArray _dst, Size dsize,
 
     hal::resize(src.type(), src.data, src.step, src.cols, src.rows, dst.data, dst.step, dst.cols, dst.rows, inv_scale_x, inv_scale_y, interpolation);
 }
-
-
-CV_IMPL void
-cvResize( const CvArr* srcarr, CvArr* dstarr, int method )
-{
-    cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr);
-    CV_Assert( src.type() == dst.type() );
-    cv::resize( src, dst, dst.size(), (double)dst.cols/src.cols,
-        (double)dst.rows/src.rows, method );
-}
-
-/* End of file. */

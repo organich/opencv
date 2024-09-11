@@ -42,19 +42,19 @@ namespace CV__SIMD_NAMESPACE {
 #if defined(CV_SIMD_FP16) && CV_SIMD_FP16
     // Implementation is the same as float32 vector.
     inline v_float16 v_exp(const v_float16 &x) {
-        const v_float16 _vexp_lo_f16 = vx_setall_f16(-10.7421875f);
-        const v_float16 _vexp_hi_f16 = vx_setall_f16(11.f);
-        const v_float16 _vexp_half_fp16 = vx_setall_f16(0.5f);
-        const v_float16 _vexp_one_fp16 = vx_setall_f16(1.f);
-        const v_float16 _vexp_LOG2EF_f16 = vx_setall_f16(1.44269504088896341f);
-        const v_float16 _vexp_C1_f16 = vx_setall_f16(-6.93359375E-1f);
-        const v_float16 _vexp_C2_f16 = vx_setall_f16(2.12194440E-4f);
-        const v_float16 _vexp_p0_f16 = vx_setall_f16(1.9875691500E-4f);
-        const v_float16 _vexp_p1_f16 = vx_setall_f16(1.3981999507E-3f);
-        const v_float16 _vexp_p2_f16 = vx_setall_f16(8.3334519073E-3f);
-        const v_float16 _vexp_p3_f16 = vx_setall_f16(4.1665795894E-2f);
-        const v_float16 _vexp_p4_f16 = vx_setall_f16(1.6666665459E-1f);
-        const v_float16 _vexp_p5_f16 = vx_setall_f16(5.0000001201E-1f);
+        const v_float16 _vexp_lo_f16 = vx_setall_f16(hfloat(-10.7421875f));
+        const v_float16 _vexp_hi_f16 = vx_setall_f16(hfloat(11.f));
+        const v_float16 _vexp_half_fp16 = vx_setall_f16(hfloat(0.5f));
+        const v_float16 _vexp_one_fp16 = vx_setall_f16(hfloat(1.f));
+        const v_float16 _vexp_LOG2EF_f16 = vx_setall_f16(hfloat(1.44269504088896341f));
+        const v_float16 _vexp_C1_f16 = vx_setall_f16(hfloat(-6.93359375E-1f));
+        const v_float16 _vexp_C2_f16 = vx_setall_f16(hfloat(2.12194440E-4f));
+        const v_float16 _vexp_p0_f16 = vx_setall_f16(hfloat(1.9875691500E-4f));
+        const v_float16 _vexp_p1_f16 = vx_setall_f16(hfloat(1.3981999507E-3f));
+        const v_float16 _vexp_p2_f16 = vx_setall_f16(hfloat(8.3334519073E-3f));
+        const v_float16 _vexp_p3_f16 = vx_setall_f16(hfloat(4.1665795894E-2f));
+        const v_float16 _vexp_p4_f16 = vx_setall_f16(hfloat(1.6666665459E-1f));
+        const v_float16 _vexp_p5_f16 = vx_setall_f16(hfloat(5.0000001201E-1f));
         const v_int16 _vexp_bias_s16 = vx_setall_s16(0xf);
 
         v_float16 _vexp_, _vexp_x, _vexp_y, _vexp_xx;
@@ -202,19 +202,19 @@ namespace CV__SIMD_NAMESPACE {
 //! @{
 #if defined(CV_SIMD_FP16) && CV_SIMD_FP16
     inline v_float16 v_log(const v_float16 &x) {
-        const v_float16 _vlog_one_fp16 = vx_setall_f16(1.0f);
-        const v_float16 _vlog_SQRTHF_fp16 = vx_setall_f16(0.707106781186547524f);
-        const v_float16 _vlog_q1_fp16 = vx_setall_f16(-2.12194440E-4f);
-        const v_float16 _vlog_q2_fp16 = vx_setall_f16(0.693359375f);
-        const v_float16 _vlog_p0_fp16 = vx_setall_f16(7.0376836292E-2f);
-        const v_float16 _vlog_p1_fp16 = vx_setall_f16(-1.1514610310E-1f);
-        const v_float16 _vlog_p2_fp16 = vx_setall_f16(1.1676998740E-1f);
-        const v_float16 _vlog_p3_fp16 = vx_setall_f16(-1.2420140846E-1f);
-        const v_float16 _vlog_p4_fp16 = vx_setall_f16(1.4249322787E-1f);
-        const v_float16 _vlog_p5_fp16 = vx_setall_f16(-1.6668057665E-1f);
-        const v_float16 _vlog_p6_fp16 = vx_setall_f16(2.0000714765E-1f);
-        const v_float16 _vlog_p7_fp16 = vx_setall_f16(-2.4999993993E-1f);
-        const v_float16 _vlog_p8_fp16 = vx_setall_f16(3.3333331174E-1f);
+        const v_float16 _vlog_one_fp16 = vx_setall_f16(hfloat(1.0f));
+        const v_float16 _vlog_SQRTHF_fp16 = vx_setall_f16(hfloat(0.707106781186547524f));
+        const v_float16 _vlog_q1_fp16 = vx_setall_f16(hfloat(-2.12194440E-4f));
+        const v_float16 _vlog_q2_fp16 = vx_setall_f16(hfloat(0.693359375f));
+        const v_float16 _vlog_p0_fp16 = vx_setall_f16(hfloat(7.0376836292E-2f));
+        const v_float16 _vlog_p1_fp16 = vx_setall_f16(hfloat(-1.1514610310E-1f));
+        const v_float16 _vlog_p2_fp16 = vx_setall_f16(hfloat(1.1676998740E-1f));
+        const v_float16 _vlog_p3_fp16 = vx_setall_f16(hfloat(-1.2420140846E-1f));
+        const v_float16 _vlog_p4_fp16 = vx_setall_f16(hfloat(1.4249322787E-1f));
+        const v_float16 _vlog_p5_fp16 = vx_setall_f16(hfloat(-1.6668057665E-1f));
+        const v_float16 _vlog_p6_fp16 = vx_setall_f16(hfloat(2.0000714765E-1f));
+        const v_float16 _vlog_p7_fp16 = vx_setall_f16(hfloat(-2.4999993993E-1f));
+        const v_float16 _vlog_p8_fp16 = vx_setall_f16(hfloat(3.3333331174E-1f));
         const v_int16 _vlog_inv_mant_mask_s16 = vx_setall_s16(~0x7c00);
 
         v_float16 _vlog_x, _vlog_e, _vlog_y, _vlog_z, _vlog_tmp;
@@ -224,7 +224,7 @@ namespace CV__SIMD_NAMESPACE {
         _vlog_emm0 = v_shr(_vlog_ux, 10);
 
         _vlog_ux = v_and(_vlog_ux, _vlog_inv_mant_mask_s16);
-        _vlog_ux = v_or(_vlog_ux, v_reinterpret_as_s16(vx_setall_f16(0.5f)));
+        _vlog_ux = v_or(_vlog_ux, v_reinterpret_as_s16(vx_setall_f16(hfloat(0.5f))));
         _vlog_x = v_reinterpret_as_f16(_vlog_ux);
 
         _vlog_emm0 = v_sub(_vlog_emm0, vx_setall_s16(0xf));
@@ -253,7 +253,7 @@ namespace CV__SIMD_NAMESPACE {
 
         _vlog_y = v_fma(_vlog_e, _vlog_q1_fp16, _vlog_y);
 
-        _vlog_y = v_sub(_vlog_y, v_mul(_vlog_z, vx_setall_f16(0.5f)));
+        _vlog_y = v_sub(_vlog_y, v_mul(_vlog_z, vx_setall_f16(hfloat(0.5f))));
 
         _vlog_x = v_add(_vlog_x, _vlog_y);
         _vlog_x = v_fma(_vlog_e, _vlog_q2_fp16, _vlog_x);

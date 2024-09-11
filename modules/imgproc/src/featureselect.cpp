@@ -42,8 +42,6 @@
 #include "precomp.hpp"
 #include "opencl_kernels_imgproc.hpp"
 
-#include "opencv2/core/openvx/ovx_defs.hpp"
-
 #include <cstdio>
 #include <vector>
 #include <iostream>
@@ -262,98 +260,11 @@ static bool ocl_goodFeaturesToTrack( InputArray _image, OutputArray _corners,
         }
     }
 
-    Mat(corners).convertTo(_corners, _corners.fixedType() ? _corners.type() : CV_32F);
+    Mat(corners).reshape(2, (int)ncorners).
+        convertTo(_corners, _corners.fixedType() ? _corners.type() : CV_32F);
     if (_cornersQuality.needed()) {
-        Mat(cornersQuality).convertTo(_cornersQuality, _cornersQuality.fixedType() ? _cornersQuality.type() : CV_32F);
-    }
-
-    return true;
-}
-
-#endif
-
-#ifdef HAVE_OPENVX
-struct VxKeypointsComparator
-{
-    bool operator () (const vx_keypoint_t& a, const vx_keypoint_t& b)
-    {
-        return a.strength > b.strength;
-    }
-};
-
-static bool openvx_harris(Mat image, OutputArray _corners,
-                          int _maxCorners, double _qualityLevel, double _minDistance,
-                          int _blockSize, int _gradientSize, double _harrisK)
-{
-    using namespace ivx;
-
-    if(image.type() != CV_8UC1) return false;
-
-    //OpenVX implementations don't have to provide other sizes
-    if(!(_blockSize == 3 || _blockSize == 5 || _blockSize == 7)) return false;
-
-    try
-    {
-        Context context = ovx::getOpenVXContext();
-
-        Image ovxImage = Image::createFromHandle(context, Image::matTypeToFormat(image.type()),
-                                                 Image::createAddressing(image), image.data);
-        //The minimum threshold which to eliminate Harris Corner scores (computed using the normalized Sobel kernel).
-        //set to 0, we'll filter it later by threshold
-        ivx::Scalar strengthThresh = ivx::Scalar::create<VX_TYPE_FLOAT32>(context, 0);
-
-        //The gradient window size to use on the input.
-        vx_int32 gradientSize = _gradientSize;
-
-        //The block window size used to compute the harris corner score
-        vx_int32 blockSize = _blockSize;
-
-        //The scalar sensitivity threshold k from the Harris-Stephens equation
-        ivx::Scalar sensivity = ivx::Scalar::create<VX_TYPE_FLOAT32>(context, _harrisK);
-
-        //The radial Euclidean distance for non-maximum suppression
-        ivx::Scalar minDistance = ivx::Scalar::create<VX_TYPE_FLOAT32>(context, _minDistance);
-
-        vx_size capacity = image.cols * image.rows;
-        Array corners = Array::create(context, VX_TYPE_KEYPOINT, capacity);
-        ivx::Scalar numCorners = ivx::Scalar::create<VX_TYPE_SIZE>(context, 0);
-
-        IVX_CHECK_STATUS(vxuHarrisCorners(context, ovxImage, strengthThresh, minDistance, sensivity,
-                                          gradientSize, blockSize, corners, numCorners));
-
-        std::vector<vx_keypoint_t> vxKeypoints;
-        corners.copyTo(vxKeypoints);
-
-        std::sort(vxKeypoints.begin(), vxKeypoints.end(), VxKeypointsComparator());
-
-        vx_float32 maxStrength = 0.0f;
-        if(vxKeypoints.size() > 0)
-            maxStrength = vxKeypoints[0].strength;
-        size_t maxKeypoints = min((size_t)_maxCorners, vxKeypoints.size());
-        std::vector<Point2f> keypoints;
-        keypoints.reserve(maxKeypoints);
-        for(size_t i = 0; i < maxKeypoints; i++)
-        {
-            vx_keypoint_t kp = vxKeypoints[i];
-            if(kp.strength < maxStrength*_qualityLevel) break;
-            keypoints.push_back(Point2f((float)kp.x, (float)kp.y));
-        }
-
-        Mat(keypoints).convertTo(_corners, _corners.fixedType() ? _corners.type() : CV_32F);
-
-#ifdef VX_VERSION_1_1
-        //we should take user memory back before release
-        //(it's not done automatically according to standard)
-        ovxImage.swapHandle();
-#endif
-    }
-    catch (const RuntimeError & e)
-    {
-        VX_DbgThrow(e.what());
-    }
-    catch (const WrapperError & e)
-    {
-        VX_DbgThrow(e.what());
+        Mat(cornersQuality).reshape(1, (int)ncorners).
+            convertTo(_cornersQuality, _cornersQuality.fixedType() ? _cornersQuality.type() : CV_32F);
     }
 
     return true;
@@ -400,11 +311,6 @@ void cv::goodFeaturesToTrack( InputArray _image, OutputArray _corners,
         _cornersQuality.release();
         return;
     }
-
-    // Disabled due to bad accuracy
-    CV_OVX_RUN(false && useHarrisDetector && _mask.empty() &&
-               !ovx::skipSmallImages<VX_KERNEL_HARRIS_CORNERS>(image.cols, image.rows),
-               openvx_harris(image, _corners, maxCorners, qualityLevel, minDistance, blockSize, gradientSize, harrisK))
 
     if( useHarrisDetector )
         cornerHarris( image, eig, blockSize, gradientSize, harrisK );
@@ -541,33 +447,12 @@ void cv::goodFeaturesToTrack( InputArray _image, OutputArray _corners,
         }
     }
 
-    Mat(corners).convertTo(_corners, _corners.fixedType() ? _corners.type() : CV_32F);
+    Mat(corners).reshape(2, (int)ncorners).
+        convertTo(_corners, _corners.fixedType() ? _corners.type() : CV_32F);
     if (_cornersQuality.needed()) {
-        Mat(cornersQuality).convertTo(_cornersQuality, _cornersQuality.fixedType() ? _cornersQuality.type() : CV_32F);
+        Mat(cornersQuality).reshape(1, (int)ncorners).
+            convertTo(_cornersQuality, _cornersQuality.fixedType() ? _cornersQuality.type() : CV_32F);
     }
-}
-
-CV_IMPL void
-cvGoodFeaturesToTrack( const void* _image, void*, void*,
-                       CvPoint2D32f* _corners, int *_corner_count,
-                       double quality_level, double min_distance,
-                       const void* _maskImage, int block_size,
-                       int use_harris, double harris_k )
-{
-    cv::Mat image = cv::cvarrToMat(_image), mask;
-    std::vector<cv::Point2f> corners;
-
-    if( _maskImage )
-        mask = cv::cvarrToMat(_maskImage);
-
-    CV_Assert( _corners && _corner_count );
-    cv::goodFeaturesToTrack( image, corners, *_corner_count, quality_level,
-        min_distance, mask, block_size, use_harris != 0, harris_k );
-
-    size_t i, ncorners = corners.size();
-    for( i = 0; i < ncorners; i++ )
-        _corners[i] = cvPoint2D32f(corners[i]);
-    *_corner_count = (int)ncorners;
 }
 
 /* End of file. */

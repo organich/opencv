@@ -42,13 +42,6 @@ Ptr<BackendWrapper> Net::Impl::wrap(Mat& host)
             CV_Error(Error::StsInternal, "");
 #endif
         }
-        else if (preferableBackend == DNN_BACKEND_HALIDE)
-        {
-            CV_Assert(haveHalide());
-#ifdef HAVE_HALIDE
-            return Ptr<BackendWrapper>(new HalideBackendWrapper(baseBuffer, shape));
-#endif
-        }
         else if (preferableBackend == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019)
         {
             CV_ERROR_DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019;
@@ -73,14 +66,27 @@ Ptr<BackendWrapper> Net::Impl::wrap(Mat& host)
         {
             CV_Assert(haveCUDA());
 #ifdef HAVE_CUDA
-            switch (preferableTarget)
+            CV_CheckType(host.depth(), host.depth() == CV_32F || host.depth() == CV_8S || host.depth() == CV_8U || host.depth() == CV_32S || host.depth() == CV_64S || host.depth() == CV_Bool, "Unsupported type for CUDA");
+            CV_Assert(IS_DNN_CUDA_TARGET(preferableTarget));
+            switch (host.depth())
             {
-            case DNN_TARGET_CUDA:
-                return CUDABackendWrapperFP32::create(baseBuffer, shape);
-            case DNN_TARGET_CUDA_FP16:
-                return CUDABackendWrapperFP16::create(baseBuffer, shape);
+            case CV_32F:
+                if (preferableTarget == DNN_TARGET_CUDA_FP16)
+                    return CUDABackendWrapperFP16::create(baseBuffer, shape);
+                else
+                    return CUDABackendWrapperFP32::create(baseBuffer, shape);
+            case CV_8S:
+                return CUDABackendWrapperINT8::create(baseBuffer, shape);
+            case CV_8U:
+                return CUDABackendWrapperUINT8::create(baseBuffer, shape);
+            case CV_32S:
+                return CUDABackendWrapperINT32::create(baseBuffer, shape);
+            case CV_64S:
+                return CUDABackendWrapperINT64::create(baseBuffer, shape);
+            case CV_Bool:
+                return CUDABackendWrapperBOOL::create(baseBuffer, shape);
             default:
-                CV_Assert(IS_DNN_CUDA_TARGET(preferableTarget));
+                CV_Error(Error::BadDepth, "Unsupported mat type for CUDA");
             }
 #endif
         }
@@ -110,14 +116,6 @@ void Net::Impl::initBackend(const std::vector<LayerPin>& blobsToKeep_)
     if (preferableBackend == DNN_BACKEND_OPENCV)
     {
         CV_Assert(preferableTarget == DNN_TARGET_CPU || preferableTarget == DNN_TARGET_CPU_FP16 || IS_DNN_OPENCL_TARGET(preferableTarget));
-    }
-    else if (preferableBackend == DNN_BACKEND_HALIDE)
-    {
-#ifdef HAVE_HALIDE
-        initHalideBackend();
-#else
-        CV_Error(Error::StsNotImplemented, "This OpenCV version is built without support of Halide");
-#endif
     }
     else if (preferableBackend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
     {

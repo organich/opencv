@@ -299,11 +299,6 @@ public:
     }
 #endif
 
-    virtual bool tryQuantize(const std::vector<std::vector<float>> &scales,
-                             const std::vector<std::vector<int>> &zeropoints, LayerParams &params) CV_OVERRIDE {
-        return true;
-    }
-
 private:
     int blocksize;
 
@@ -475,11 +470,6 @@ public:
         return Ptr<BackendNode>(new TimVXBackendNode(timvx_graph, timvx_node, input_wrapper_indices, output_wrapper_indices));
     }
 #endif
-
-    virtual bool tryQuantize(const std::vector<std::vector<float>> &scales,
-                             const std::vector<std::vector<int>> &zeropoints, LayerParams &params) CV_OVERRIDE {
-        return true;
-    }
 
 private:
     int blocksize;

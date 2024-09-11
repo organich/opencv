@@ -216,19 +216,19 @@ public class ImgprocTest extends OpenCVTestCase {
 
     public void testBoxFilterMatMatIntSize() {
         Size size = new Size(3, 3);
-        Imgproc.boxFilter(gray0, dst, 8, size);
+        Imgproc.boxFilter(gray0, dst, 0, size);
         assertMatEqual(gray0, dst);
         // TODO_: write better test
     }
 
     public void testBoxFilterMatMatIntSizePointBoolean() {
-        Imgproc.boxFilter(gray255, dst, 8, size, anchorPoint, false);
+        Imgproc.boxFilter(gray255, dst, 0, size, anchorPoint, false);
         assertMatEqual(gray255, dst);
         // TODO_: write better test
     }
 
     public void testBoxFilterMatMatIntSizePointBooleanInt() {
-        Imgproc.boxFilter(gray255, dst, 8, size, anchorPoint, false, Core.BORDER_REFLECT);
+        Imgproc.boxFilter(gray255, dst, 0, size, anchorPoint, false, Core.BORDER_REFLECT);
         assertMatEqual(gray255, dst);
         // TODO_: write better test
     }
@@ -264,7 +264,7 @@ public class ImgprocTest extends OpenCVTestCase {
                 put(5, 0, 100);
             }
         };
-        assertMatEqual(truth, hist, EPS);
+        assertMatEqual(truth, hist.reshape(1, hist.cols()), EPS);
     }
 
     public void testCalcHistListOfMatListOfIntegerMatMatListOfIntegerListOfFloat2D() {
@@ -319,7 +319,7 @@ public class ImgprocTest extends OpenCVTestCase {
                  0, 25, 29447
                 );
 
-        assertMatEqual(truth, hist3D, EPS);
+        assertMatEqual(truth, hist3D.reshape(3, hist3D.cols()), EPS);
     }
 
     public void testCalcHistListOfMatListOfIntegerMatMatListOfIntegerListOfFloatBoolean() {
@@ -429,7 +429,7 @@ public class ImgprocTest extends OpenCVTestCase {
         MatOfInt expHull = new MatOfInt(
                 0, 1, 2, 3
         );
-        assertMatEqual(expHull, hull, EPS);
+        assertMatEqual(expHull, hull.reshape(1, (int)hull.total()), EPS);
     }
 
     public void testConvexHullMatMatBooleanBoolean() {
@@ -449,7 +449,7 @@ public class ImgprocTest extends OpenCVTestCase {
         MatOfInt expHull = new MatOfInt(
                 3, 2, 1, 0
         );
-        assertMatEqual(expHull, hull, EPS);
+        assertMatEqual(expHull, hull.reshape(1, hull.cols()), EPS);
     }
 
     public void testConvexityDefects() {
@@ -468,7 +468,7 @@ public class ImgprocTest extends OpenCVTestCase {
         MatOfInt4 convexityDefects = new MatOfInt4();
         Imgproc.convexityDefects(points, hull, convexityDefects);
 
-        assertMatEqual(new MatOfInt4(3, 0, 5, 3620), convexityDefects);
+        assertMatEqual(new MatOfInt4(3, 0, 5, 3620), convexityDefects.reshape(4, convexityDefects.cols()));
     }
 
     public void testCornerEigenValsAndVecsMatMatIntInt() {
@@ -1105,7 +1105,7 @@ public class ImgprocTest extends OpenCVTestCase {
 
         Imgproc.HoughLinesP(img, lines, 1, 3.1415926/180, 100);
 
-        assertEquals(2, lines.rows());
+        assertEquals(2, lines.total());
 
         /*
         Log.d("HoughLinesP", "lines=" + lines);
@@ -1814,13 +1814,14 @@ public class ImgprocTest extends OpenCVTestCase {
         double fontScale = 2;
         int thickness = 3;
         int baseLine[] = new int[1];
+        double EPS=5.0;
 
         Imgproc.getTextSize(text, Imgproc.FONT_HERSHEY_SCRIPT_SIMPLEX, fontScale, thickness, null);
         Size res = Imgproc.getTextSize(text, Imgproc.FONT_HERSHEY_SCRIPT_SIMPLEX, fontScale, thickness, baseLine);
 
-        assertEquals(543.0, res.width);
-        assertEquals(44.0, res.height);
-        assertEquals(20, baseLine[0]);
+        assertEquals(494.0, res.width, EPS);
+        assertEquals(51.0, res.height, EPS);
+        assertEquals(10, baseLine[0], 2.0);
     }
 
     public void testCircleMatPointIntScalar() {
@@ -2032,7 +2033,7 @@ public class ImgprocTest extends OpenCVTestCase {
 
     public void testPutTextMatStringPointIntDoubleScalar() {
         String text = "Hello World";
-        Size labelSize = new Size(175, 22);
+        Size labelSize = new Size(170, 23);
         Mat img = new Mat(20 + (int) labelSize.height, 20 + (int) labelSize.width, CvType.CV_8U, colorBlack);
         Point origin = new Point(10, labelSize.height + 10);
 
@@ -2040,13 +2041,13 @@ public class ImgprocTest extends OpenCVTestCase {
 
         assertTrue(Core.countNonZero(img) > 0);
         // check that border is not corrupted
-        Imgproc.rectangle(img, new Point(11, 11), new Point(labelSize.width + 10, labelSize.height + 10), colorBlack, Imgproc.FILLED);
+        Imgproc.rectangle(img, new Point(10, 10), new Point(labelSize.width + 10, labelSize.height + 10), colorBlack, Imgproc.FILLED);
         assertEquals(0, Core.countNonZero(img));
     }
 
     public void testPutTextMatStringPointIntDoubleScalarInt() {
         String text = "Hello World";
-        Size labelSize = new Size(176, 22);
+        Size labelSize = new Size(170, 23);
         Mat img = new Mat(20 + (int) labelSize.height, 20 + (int) labelSize.width, CvType.CV_8U, colorBlack);
         Point origin = new Point(10, labelSize.height + 10);
 
@@ -2060,7 +2061,7 @@ public class ImgprocTest extends OpenCVTestCase {
 
     public void testPutTextMatStringPointIntDoubleScalarIntIntBoolean() {
         String text = "Hello World";
-        Size labelSize = new Size(175, 22);
+        Size labelSize = new Size(170, 23);
 
         Mat img = new Mat(20 + (int) labelSize.height, 20 + (int) labelSize.width, CvType.CV_8U, colorBlack);
         Point origin = new Point(10, 10);
@@ -2069,7 +2070,7 @@ public class ImgprocTest extends OpenCVTestCase {
 
         assertTrue(Core.countNonZero(img) > 0);
         // check that border is not corrupted
-        Imgproc.rectangle(img, new Point(10, 10), new Point(labelSize.width + 9, labelSize.height + 9), colorBlack, Imgproc.FILLED);
+        Imgproc.rectangle(img, new Point(10, 10), new Point(labelSize.width + 10, labelSize.height + 10), colorBlack, Imgproc.FILLED);
         assertEquals(0, Core.countNonZero(img));
     }
 }

@@ -3,6 +3,7 @@
 from __future__ import print_function
 import hdr_parser, sys, re
 from string import Template
+from pprint import pprint
 from collections import namedtuple
 from itertools import chain
 
@@ -10,7 +11,6 @@ from typing_stubs_generator import TypingStubsGenerator
 
 if sys.version_info[0] >= 3:
     from io import StringIO
-
 else:
     from cStringIO import StringIO
 
@@ -1030,6 +1030,7 @@ class FuncInfo(object):
                 #   - declares the list of keyword parameters
                 #   - calls PyArg_ParseTupleAndKeywords
                 #   - converts complex arguments from PyObject's to native OpenCV types
+
                 code_parse = gen_template_parse_args.substitute(
                     kw_list=", ".join(['"' + v.args[argno].export_name + '"' for _, argno in v.py_arglist]),
                     fmtspec=fmtspec,
@@ -1176,6 +1177,7 @@ class PythonWrapperGenerator(object):
                 % (name, cname))
             sys.exit(-1)
         ns.consts[name] = cname
+
         value = decl[1]
         py_name = '.'.join([namespace, name])
         py_signatures = self.py_signatures.setdefault(cname, [])
@@ -1280,6 +1282,7 @@ class PythonWrapperGenerator(object):
         if classname and isconstructor:
             self.classes[classname].constructor = func
 
+
     def gen_namespace(self, ns_name):
         ns = self.namespaces[ns_name]
         wname = normalize_class_name(ns_name)
@@ -1331,7 +1334,6 @@ class PythonWrapperGenerator(object):
     def gen(self, srcfiles, output_path):
         self.clear()
         self.parser = hdr_parser.CppHeaderParser(generate_umat_decls=True, generate_gpumat_decls=True)
-
 
         # step 1: scan the headers and build more descriptive maps of classes, consts, functions
         for hdr in srcfiles:
@@ -1458,6 +1460,7 @@ class PythonWrapperGenerator(object):
 
             _registerType(classinfo)
 
+
         # step 3: generate the code for all the global functions
         for ns_name, ns in sorted(self.namespaces.items()):
             if ns_name.split('.')[0] != 'cv':
@@ -1499,7 +1502,6 @@ class PythonWrapperGenerator(object):
         self.save(output_path, "pyopencv_generated_modules.h", self.code_ns_init)
         self.save(output_path, "pyopencv_generated_modules_content.h", self.code_ns_reg)
         self.save_json(output_path, "pyopencv_signatures.json", self.py_signatures)
-
 
 if __name__ == "__main__":
     srcfiles = hdr_parser.opencv_hdr_list

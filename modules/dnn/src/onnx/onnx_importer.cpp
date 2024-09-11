@@ -84,6 +84,7 @@ class ONNXImporter
                                     const opencv_onnx::GraphProto& graph_proto);
     Mat getBlob(const opencv_onnx::NodeProto& node_proto, int index);
     Mat getBlob(const std::string& input_name);
+    Mat getIntBlob(const opencv_onnx::NodeProto& node_proto, int index);
     TensorInfo getBlobExtraInfo(const opencv_onnx::NodeProto& node_proto, int index);
     TensorInfo getBlobExtraInfo(const std::string& input_name);
 
@@ -197,6 +198,8 @@ private:
     void parseTopK                 (LayerParams& LayerParams, const opencv_onnx::NodeProto& node_proto);
     void parseSimpleLayers         (LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto);
     void parseEinsum               (LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto);
+    void parseHardmax              (LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto);
+    void parseGatherND             (LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto);
 
     // Domain: com.microsoft
     // URL: https://github.com/microsoft/onnxruntime/blob/master/docs/ContribOperators.md
@@ -383,27 +386,24 @@ void runLayer(LayerParams& params, const std::vector<Mat>& inputs,
     CV_Assert((bool)layer);
 
     std::vector<MatShape> inpShapes(inputs.size());
-    int ddepth = params.get<int>("depth", CV_32F);
+    std::vector<MatType> inpTypes(inputs.size());
     for (size_t i = 0; i < inputs.size(); ++i)
     {
         inpShapes[i] = shape(inputs[i]);
-        if (i > 0 && ddepth != inputs[i].depth())
-            CV_Error(Error::StsNotImplemented, cv::format("Mixed input data types. Required type: %d, actual type: %d", ddepth, inputs[i].depth()));
-
-        // Quantize and Dequantize layer have different output type than input.
-        if (params.type != "Quantize" && params.type != "Dequantize")
-            ddepth = inputs[i].depth();
+        inpTypes[i] = inputs[i].type();
     }
 
     std::vector<MatShape> outShapes, internalShapes;
+    std::vector<MatType> outTypes, internalTypes;
     layer->getMemoryShapes(inpShapes, 0, outShapes, internalShapes);
+    layer->getTypes(inpTypes, outShapes.size(), internalShapes.size(), outTypes, internalTypes);
 
     std::vector<Mat> internals(internalShapes.size());
     outputs.resize(outShapes.size());
     for (size_t i = 0; i < outShapes.size(); ++i)
-        outputs[i].create(outShapes[i], ddepth);
+        outputs[i].create(outShapes[i], outTypes[i]);
     for (size_t i = 0; i < internalShapes.size(); ++i)
-        internals[i].create(internalShapes[i], ddepth);
+        internals[i].create(internalShapes[i], internalTypes[i]);
 
     layer->finalize(inputs, outputs);
     layer->forward(inputs, outputs, internals);
@@ -599,6 +599,20 @@ Mat ONNXImporter::getBlob(const std::string& input_name)
         CV_Error(Error::StsBadArg, std::string("Blob ") + input_name + " not found in const blobs");
     }
     return constBlob->second;
+}
+
+Mat ONNXImporter::getIntBlob(const opencv_onnx::NodeProto& node_proto, int index)
+{
+    Mat blob = getBlob(node_proto, index);
+    if (blob.depth() == CV_32S)
+        return blob;
+    if (blob.depth() == CV_64S) {
+        Mat blobInt32;
+        blob.convertTo(blobInt32, CV_32S);
+        return blobInt32;
+    }
+    CV_Error(Error::BadDepth, "blob should have integer type");
+    return Mat();
 }
 
 ONNXImporter::TensorInfo ONNXImporter::getBlobExtraInfo(const opencv_onnx::NodeProto &node_proto, int index)
@@ -1157,6 +1171,7 @@ void ONNXImporter::parseGlobalPool(LayerParams &layerParams, const opencv_onnx::
 
 void ONNXImporter::parseReduce(LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto)
 {
+    layerParams.type = "Reduce";
     const auto& op_type = node_proto.op_type();
     String reduce_type;
     if (op_type == "ReduceMax")
@@ -1186,18 +1201,28 @@ void ONNXImporter::parseReduce(LayerParams& layerParams, const opencv_onnx::Node
     int num_inputs = node_proto.input_size();
     CV_Check(num_inputs, num_inputs >= 1 && num_inputs <= 2, "DNN/ONNX: Reduce layers should have at least one input and at most two inputs");
 
+    if (num_inputs >= 2)
+        CV_CheckTrue(constBlobs.find(node_proto.input(1)) != constBlobs.end(), "Reduce layer doesn't support non contant axes");
+
     // "axes" is turned to one of the inputs since opset 18,
     // except for ReduceSum, which has "axes" input since opset 13.
     if (!layerParams.has("axes") && num_inputs == 2 && constBlobs.find(node_proto.input(1)) != constBlobs.end()) {
-        Mat mat_axes = getBlob(node_proto, 1);
-        int num_axes = mat_axes.total();
+        Mat mat_axes = getIntBlob(node_proto, 1);
+        int num_axes = (int)mat_axes.total();
         std::vector<int> axes(num_axes);
         for (int i = 0; i < num_axes; ++i)
             axes[i] = mat_axes.at<int>(i);
         layerParams.set("axes", DictValue::arrayInt(&axes[0], num_axes));
+        if (constBlobs.find(node_proto.input(0)) != constBlobs.end()){
+            std::vector<Mat> inputs, output;
+            inputs.push_back(getBlob(node_proto, 0));
+            runLayer(layerParams, inputs, output);
+            CV_Assert(output.size() == 1);
+            addConstant(node_proto.output(0), output[0]);
+            return;
+        }
     }
 
-    layerParams.type = "Reduce";
     addLayer(layerParams, node_proto);
 }
 
@@ -1240,15 +1265,15 @@ void ONNXImporter::parseSlice(LayerParams& layerParams, const opencv_onnx::NodeP
         {
             CV_Assert(constBlobs.find(node_proto.input(i)) != constBlobs.end());
         }
-        Mat start_blob = getBlob(node_proto, 1);
-        Mat end_blob = getBlob(node_proto, 2);
+        Mat start_blob = getIntBlob(node_proto, 1);
+        Mat end_blob = getIntBlob(node_proto, 2);
         CV_Assert(start_blob.total() == end_blob.total());
         starts_ = DictValue::arrayInt(start_blob.begin<int>(), start_blob.total());
         ends_ = DictValue::arrayInt(end_blob.begin<int>(), end_blob.total());
 
         if (inp_size > 3 && !getBlob(node_proto, 3).empty())
         {
-            Mat axes_blob = getBlob(node_proto, 3);
+            Mat axes_blob = getIntBlob(node_proto, 3);
             CV_Assert(axes_blob.total() == start_blob.total());
             axes_ = DictValue::arrayInt(axes_blob.begin<int>(), axes_blob.total());
             axis = axes_.getIntValue(0) < 0 ? axes_.getIntValue(0) + dims : axes_.getIntValue(0);
@@ -1257,7 +1282,7 @@ void ONNXImporter::parseSlice(LayerParams& layerParams, const opencv_onnx::NodeP
 
         if (inp_size == 5 && !getBlob(node_proto, 4).empty())
         {
-            Mat step_blob = getBlob(node_proto, 4);
+            Mat step_blob = getIntBlob(node_proto, 4);
             CV_Assert(step_blob.total() == start_blob.total());
             steps_ = DictValue::arrayInt(step_blob.begin<int>(), step_blob.total());
             steps.resize(dims, 1);
@@ -1363,7 +1388,7 @@ void ONNXImporter::parseSplit(LayerParams& layerParams, const opencv_onnx::NodeP
     else if (node_proto.input_size() == 2) // opset >= 13, the split will be stored at the second input, instead of the attribute.
     {
         CV_Assert(constBlobs.find(node_proto.input(1)) != constBlobs.end());
-        Mat splitsBlob = getBlob(node_proto, 1);
+        Mat splitsBlob = getIntBlob(node_proto, 1);
         int splitSize = splitsBlob.total();
         if (splitSize == 1)
         {
@@ -1400,13 +1425,17 @@ void ONNXImporter::parseConstant(LayerParams& layerParams, const opencv_onnx::No
 {
     CV_Assert(node_proto.input_size() == 0);
     CV_Assert(layerParams.blobs.size() == 1);
-    addConstant(node_proto.output(0), layerParams.blobs[0]);
-    // add constant for constBlobsExtraInfo
-    if (layerParams.has("original_dims_of_mat"))
-    {
+    if (layerParams.has("original_dims_of_mat")) {
         int original_dims_of_mat = layerParams.get<int>("original_dims_of_mat");
+        if (original_dims_of_mat == 0) {
+            Mat& blob = layerParams.blobs[0];
+            CV_Assert(blob.dims <= 2 && blob.total() == 1);
+            blob = blob.reshape(1, 0, 0);
+        }
+        // add constant for constBlobsExtraInfo
         constBlobsExtraInfo.insert(std::make_pair(node_proto.output(0), TensorInfo(original_dims_of_mat)));
     }
+    addConstant(node_proto.output(0), layerParams.blobs[0]);
 }
 
 void transformBlobs(std::vector<Mat>& blobs)
@@ -1658,7 +1687,7 @@ void ONNXImporter::parseLSTM(LayerParams& layerParams, const opencv_onnx::NodePr
 
     if (4 < lstm_proto.input_size() && !lstm_proto.input(4).empty())
     {
-        Mat blob = getBlob(lstm_proto, 4);
+        Mat blob = getIntBlob(lstm_proto, 4);
         CV_Assert(blob.total() == batch_size);
         for (MatIterator_<int32_t> it = blob.begin<int32_t>(); it != blob.end<int32_t>(); ++it)
         {
@@ -2114,9 +2143,7 @@ void ONNXImporter::parseSqueeze(LayerParams& layerParams, const opencv_onnx::Nod
     {
         if (constBlobs.find(node_proto.input(1)) != constBlobs.end())
         {
-            Mat axesMat = getBlob(node_proto, 1);
-            if (axesMat.depth() == CV_32F)
-                axesMat.convertTo(axesMat, CV_32S);
+            Mat axesMat = getIntBlob(node_proto, 1);
             size_t axesLen = axesMat.total();
             for (int i = 0; i < axesLen; i++)
             {
@@ -2245,7 +2272,7 @@ void ONNXImporter::parseUnsqueeze(LayerParams& layerParams, const opencv_onnx::N
     DictValue axes;
     if (node_proto.input_size() == 2)
     {
-        Mat blob = getBlob(node_proto, 1);
+        Mat blob = getIntBlob(node_proto, 1);
         axes = DictValue::arrayInt(blob.ptr<int>(), blob.total());
     }
     else
@@ -2314,7 +2341,7 @@ void ONNXImporter::parseExpand(LayerParams& layerParams, const opencv_onnx::Node
     CV_CheckTrue(constBlobs.find(node_proto.input(1)) != constBlobs.end(),
                  "DNN/ONNXImporter-Expand: input shape must be constant");
 
-    Mat mat_input_shape = getBlob(node_proto, 1);
+    Mat mat_input_shape = getIntBlob(node_proto, 1);
     CV_CheckTypeEQ(mat_input_shape.depth(), CV_32S, "DNN/ONNXImporter-Expand: data type of input shape must be CV_32S");
     for (int i = 0; i < mat_input_shape.total(); ++i) {
         CV_Check(i, *(mat_input_shape.ptr<int>() + i) >= 0, "DNN/ONNXImporter-Expand: invalid shape dimension");
@@ -2349,7 +2376,7 @@ void ONNXImporter::parseReshape(LayerParams& layerParams, const opencv_onnx::Nod
     layerParams.type += (depth == CV_8S) ? "Int8" : "";
 
     if (node_proto.input_size() == 2) {
-        Mat blob = getBlob(node_proto, 1);
+        Mat blob = getIntBlob(node_proto, 1);
         CV_Assert(blob.type() == CV_32SC1);
 
         layerParams.set("dim", DictValue::arrayInt<int*>(blob.ptr<int>(), blob.total()));
@@ -2394,7 +2421,7 @@ void ONNXImporter::parsePad(LayerParams& layerParams, const opencv_onnx::NodePro
     {
         // Paddings are in order begin0, begin1, .. beginN, end0, end1, ..., endN.
         // We need to shuffle it to begin0, end0, begin1, end1, ...
-        Mat paddings = getBlob(node_proto, 1).reshape(1, 2);
+        Mat paddings = getIntBlob(node_proto, 1).reshape(1, 2);
         paddings = paddings.t();
         layerParams.set("paddings", DictValue::arrayInt(paddings.ptr<int>(), paddings.total()));
 
@@ -2402,8 +2429,16 @@ void ONNXImporter::parsePad(LayerParams& layerParams, const opencv_onnx::NodePro
         if (node_proto.input_size() == 3 && !node_proto.input(2).empty())
         {
             Mat value = getBlob(node_proto, 2);
-            float padValue = (depth == CV_8S) ? (float)value.ptr<int8_t>()[0] : value.ptr<float>()[0];
-            layerParams.set("value", padValue);
+            double padValue = 0;
+            switch(value.depth())
+            {
+                case CV_32F: padValue = value.ptr<float>()[0];   break;
+                case CV_32S: padValue = value.ptr<int32_t>()[0]; break;
+                case CV_64S: padValue = value.ptr<int64_t>()[0]; break;
+                case CV_8S:  padValue = value.ptr<int8_t>()[0];  break;
+                default: CV_Error(Error::BadDepth, "Unsupported type");
+            }
+            layerParams.set<double>("value", (double)padValue);
         }
     }
     addLayer(layerParams, node_proto);
@@ -2424,13 +2459,13 @@ void ONNXImporter::parseShape(LayerParams& layerParams, const opencv_onnx::NodeP
     int dims = static_cast<int>(inpShape.size());
     if (isInput1D)
         dims = 1;
-    Mat shapeMat(dims, 1, CV_32S);
+    Mat shapeMat(1, dims, CV_64S);
     bool isDynamicShape = false;
     for (int j = 0; j < dims; ++j)
     {
         int sz = inpShape[j];
         isDynamicShape |= (sz == 0);
-        shapeMat.at<int>(j) = sz;
+        shapeMat.at<int64_t>(j) = sz;
     }
     shapeMat.dims = 1;  // FIXIT Mat 1D
 
@@ -2444,6 +2479,20 @@ void ONNXImporter::parseShape(LayerParams& layerParams, const opencv_onnx::NodeP
 
 void ONNXImporter::parseCast(LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto)
 {
+    int type;
+    switch (layerParams.get<int>("to"))
+    {
+        case opencv_onnx::TensorProto_DataType_FLOAT:   type = CV_32F; break;
+        case opencv_onnx::TensorProto_DataType_UINT8:   type = CV_8U;  break;
+        case opencv_onnx::TensorProto_DataType_UINT16:  type = CV_16U; break;
+        case opencv_onnx::TensorProto_DataType_FLOAT16: type = CV_16F; break;
+        case opencv_onnx::TensorProto_DataType_INT8:    type = CV_8S;  break;
+        case opencv_onnx::TensorProto_DataType_INT16:   type = CV_16S; break;
+        case opencv_onnx::TensorProto_DataType_INT32:   type = CV_32S; break;
+        case opencv_onnx::TensorProto_DataType_INT64:   type = CV_64S; break;
+        default: CV_Error(Error::BadDepth, "Unsupported type");
+    }
+
     if (constBlobs.find(node_proto.input(0)) != constBlobs.end())
     {
         Mat blob = getBlob(node_proto, 0);
@@ -2451,27 +2500,15 @@ void ONNXImporter::parseCast(LayerParams& layerParams, const opencv_onnx::NodePr
         {
             constBlobsExtraInfo.insert(std::make_pair(node_proto.output(0), getBlobExtraInfo(node_proto, 0)));
         }
-        int type;
-        switch (layerParams.get<int>("to"))
-        {
-            case opencv_onnx::TensorProto_DataType_FLOAT:   type = CV_32F; break;
-            case opencv_onnx::TensorProto_DataType_UINT8:   type = CV_8U; break;
-            case opencv_onnx::TensorProto_DataType_UINT16:  type = CV_16U; break;
-            case opencv_onnx::TensorProto_DataType_FLOAT16: type = CV_16F; break;
-            case opencv_onnx::TensorProto_DataType_INT8:
-            case opencv_onnx::TensorProto_DataType_INT16:
-            case opencv_onnx::TensorProto_DataType_INT32:
-            case opencv_onnx::TensorProto_DataType_INT64:   type = CV_32S; break;
-            default: type = blob.type();
-        }
         Mat dst;
         blob.convertTo(dst, type);
         dst.dims = blob.dims;
         addConstant(node_proto.output(0), dst);
         return;
     }
-    else
-        layerParams.type = "Identity";
+
+    layerParams.type = "Cast";
+    layerParams.set("outputType", type);
     addLayer(layerParams, node_proto);
 }
 
@@ -2490,7 +2527,7 @@ void ONNXImporter::parseConstantFill(LayerParams& layerParams, const opencv_onnx
     else
         fill_value = layerParams.get("value", 0);
 
-    MatShape inpShape = getBlob(node_proto, 0);
+    MatShape inpShape = getIntBlob(node_proto, 0);
     for (int i = 0; i < inpShape.size(); i++)
         CV_CheckGT(inpShape[i], 0, "");
     Mat tensor(inpShape.size(), &inpShape[0], depth, Scalar(fill_value));
@@ -2511,19 +2548,13 @@ void ONNXImporter::parseGather(LayerParams& layerParams, const opencv_onnx::Node
             std::vector<Mat> inputs, output;
 
             Mat input = getBlob(node_proto, 0);
-            int input_real_ndims = input.dims;
-            int type = input.type();
-            input.convertTo(input, CV_32FC1);
             inputs.push_back(input);
 
             Mat indices = getBlob(node_proto, 1);
-            indices.convertTo(indices, CV_32FC1);
             inputs.push_back(indices);
 
             runLayer(layerParams, inputs, output);
-            output.back().convertTo(output.back(), type);
-            if (real_ndims < 2)  // In case of scalars or 1D vectors, OpenCV initializes 2D cv::Mat
-                output.back().dims = std::max(input_real_ndims - real_ndims, 1);
+            //output.back().dims = std::max(input.dims - real_ndims, 1);
             addConstant(node_proto.output(0), output.back());
             return;
         }
@@ -2537,10 +2568,6 @@ void ONNXImporter::parseGather(LayerParams& layerParams, const opencv_onnx::Node
             constParams.name = node_proto.input(i);
             constParams.type = "Const";
             Mat blob = getBlob(node_proto, i);
-            if (i == 1)
-            {
-                blob.convertTo(blob, CV_32FC1);
-            }
             constParams.blobs.push_back(blob);
 
             opencv_onnx::NodeProto proto;
@@ -2567,9 +2594,6 @@ void ONNXImporter::parseGatherElements(LayerParams& layerParams, const opencv_on
         std::vector<Mat> inputs, output;
         for (size_t i = 0; i < node_proto.input_size(); i++) {
             Mat blob = getBlob(node_proto, i);
-            if (i == 1) { // indices, from int32/int64 to float32 for compatibility
-                blob.convertTo(blob, CV_32F);
-            }
             inputs.push_back(blob);
         }
         runLayer(layerParams, inputs, output);
@@ -2580,9 +2604,6 @@ void ONNXImporter::parseGatherElements(LayerParams& layerParams, const opencv_on
         for (size_t i = 0; i < node_proto.input_size(); i++) {
             if (constBlobs.find(node_proto.input(i)) != constBlobs.end()) {
                 Mat blob = getBlob(node_proto, i);
-                if (i == 1) { // indices, from int32/int64 to float32 for compatibility
-                    blob.convertTo(blob, CV_32F);
-                }
 
                 LayerParams constParams;
                 constParams.name = node_proto.input(i);
@@ -2623,8 +2644,8 @@ void ONNXImporter::parseConcat(LayerParams& layerParams, const opencv_onnx::Node
         MatShape inputShape;
         for (size_t i = 0; i < inputs.size(); ++i)
         {
-            inputs[i] = getBlob(node_proto, i);
-            if (inputs[i].size.dims() > inputShape.size())
+            inputs[i] = getBlob(node_proto, (int)i);
+            if (inputs[i].size.dims() > (int)inputShape.size())
             {
                 inputShape = shape(inputs[i]);
             }
@@ -2635,10 +2656,9 @@ void ONNXImporter::parseConcat(LayerParams& layerParams, const opencv_onnx::Node
         axis = normalize_axis(axis, inputShape.size());
         for (size_t i = 0; i < inputs.size(); ++i)
         {
-            MatShape targetShape = inputShape;
-            targetShape[axis] = shape(inputs[i])[axis];
-            CV_CheckEQ(total(targetShape), total(shape(inputs[i])), "");
-            inputs[i] = inputs[i].reshape(0, targetShape);
+            inputShape[axis] = inputs[i].dims == (int)inputShape.size() ? inputs[i].size[axis] : 1;
+            CV_CheckEQ((size_t)total(inputShape), inputs[i].total(), "");
+            inputs[i] = inputs[i].reshape(1, inputShape);
         }
         runLayer(layerParams, inputs, concatenated);
 
@@ -2712,11 +2732,8 @@ void ONNXImporter::parseResize(LayerParams& layerParams, const opencv_onnx::Node
         const std::string& inputSizes = node_proto.input(3);
         if (constBlobs.find(inputSizes) != constBlobs.end())
         {
-            Mat shapes = getBlob(inputSizes);
+            Mat shapes = getIntBlob(node_proto, 3);
             CV_CheckEQ(shapes.total(), (size_t)4, "HCHW layout is expected");
-            CV_CheckDepth(shapes.depth(), shapes.depth() == CV_32S || shapes.depth() == CV_32F, "");
-            if (shapes.depth() == CV_32F)
-                shapes.convertTo(shapes, CV_32S);
             layerParams.set("width", shapes.at<int>(3));
             layerParams.set("height", shapes.at<int>(2));
         }
@@ -2830,7 +2847,7 @@ void ONNXImporter::parseCumSum(LayerParams& layerParams, const opencv_onnx::Node
 
     if (constBlobs.find(input1) != constBlobs.end())
     {
-        Mat axis_blob = getBlob(input1);
+        Mat axis_blob = getIntBlob(node_proto, 1);
         CV_Assert(axis_blob.total() == 1u);
         layerParams.set("axis", axis_blob.at<int>(0));
     }
@@ -2838,7 +2855,7 @@ void ONNXImporter::parseCumSum(LayerParams& layerParams, const opencv_onnx::Node
     addLayer(layerParams, node_proto);
 }
 
-// "Equal" "Greater" "Less" "Pow" "Add" "Sub" "Mul" "Div" "Sum" "Min" "Max" "GreaterOrEqual" "LessOrEqual"
+// "Equal" "Greater" "Less" "Pow" "Add" "Sub" "Mul" "Div" "Sum" "Min" "Max" "GreaterOrEqual" "LessOrEqual" "And" "Or" "Xor"
 void ONNXImporter::parseElementWise(LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto_)
 {
     opencv_onnx::NodeProto node_proto = node_proto_;
@@ -2914,6 +2931,34 @@ void ONNXImporter::parseDepthSpaceOps(LayerParams &layerParams, const opencv_onn
     addLayer(layerParams, node_proto);
 }
 
+template<typename T>
+Mat runRangeLayer(const Mat& startMat, const Mat& limitMat, const Mat& deltaMat)
+{
+    T start = startMat.at<T>(0);
+    T limit = limitMat.at<T>(0);
+    T delta = deltaMat.at<T>(0);
+
+    int numberOfElements;
+    if (startMat.depth() == CV_32S || startMat.depth() == CV_64S) {
+        if (delta > 0)
+            numberOfElements = (limit - start + delta - 1) / delta;
+        else
+            numberOfElements = (start - limit - delta - 1) / -delta;
+    }
+    else
+    {
+        numberOfElements = std::ceil((limit - start) / delta);
+    }
+    numberOfElements = std::max(numberOfElements, 0);
+
+    Mat r(std::vector<int>{numberOfElements}, startMat.type());
+    for (int i = 0; i < numberOfElements; i++)
+    {
+        r.at<T>(i) = start + (i * delta);
+    }
+    return r;
+}
+
 // Currently we only support range with all constant inputs
 void ONNXImporter::parseRange(LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto)
 {
@@ -2929,24 +2974,26 @@ void ONNXImporter::parseRange(LayerParams& layerParams, const opencv_onnx::NodeP
     CV_Assert(const_id.size() == 3);
 
     Mat startMat = getBlob(node_proto, 0);
-    startMat.convertTo(startMat, CV_32F);
-    float start = startMat.at<float>(0);
-
     Mat limitMat = getBlob(node_proto, 1);
-    limitMat.convertTo(limitMat, CV_32F);
-    float limit = limitMat.at<float>(0);
-
     Mat deltaMat = getBlob(node_proto, 2);
-    deltaMat.convertTo(deltaMat, CV_32F);
-    float delta = deltaMat.at<float>(0);
 
-    int number_of_elements = std::max(int(std::ceil((limit - start) / delta)), 0);
-    Mat r(1, number_of_elements, CV_32FC1); // should be 1d tensor, but Mat doesn't support it
-    for (int i = 0; i < number_of_elements; i++)
+    Mat result;
+    switch (startMat.depth())
     {
-        r.at<float>(i) = start + (i * delta);
-    }
-    addConstant(node_proto.output(0), r);
+    case CV_32F:
+        result = runRangeLayer<float>(startMat, limitMat, deltaMat);
+        break;
+    case CV_32S:
+        result = runRangeLayer<int32_t>(startMat, limitMat, deltaMat);
+        break;
+    case CV_64S:
+        result = runRangeLayer<int64_t>(startMat, limitMat, deltaMat);
+        break;
+    default:
+        CV_Error(cv::Error::BadDepth, "Unsupported type.");
+    };
+
+    addConstant(node_proto.output(0), result);
     constBlobsExtraInfo.insert(std::make_pair(node_proto.output(0), TensorInfo(1)));
 }
 
@@ -2968,8 +3015,6 @@ void ONNXImporter::parseScatter(LayerParams& layerParams, const opencv_onnx::Nod
         for (size_t i = 0; i < node_proto.input_size(); i++)
         {
             Mat blob = getBlob(node_proto, i);
-            if (i == 1) // indices
-                blob.convertTo(blob, CV_32F);
             inputs.push_back(blob);
         }
         runLayer(layerParams, inputs, output);
@@ -2984,8 +3029,6 @@ void ONNXImporter::parseScatter(LayerParams& layerParams, const opencv_onnx::Nod
             if (layer_id.find(node_proto.input(i)) == layer_id.end())
             {
                 Mat blob = getBlob(node_proto, i);
-                if (i == 1) // indices, from int32/int64 to float32
-                    blob.convertTo(blob, CV_32F);
 
                 LayerParams constParams;
                 constParams.name = node_proto.input(i);
@@ -3037,18 +3080,18 @@ void ONNXImporter::parseTile(LayerParams& layerParams, const opencv_onnx::NodePr
     if (all_const)
         input0_dims = getBlob(node_proto, 0).dims;
     else
-        input0_dims = outShapes[node_proto.input(0)].size();
+        input0_dims = (int)outShapes[node_proto.input(0)].size();
 
     // repeats, treated as paramenter
     std::vector<int> repeats_vec(input0_dims, 1);
-    Mat input1_blob = getBlob(node_proto, 1);
+    Mat input1_blob = getIntBlob(node_proto, 1);
     if (is_opset_1)
     {
         // input1 in tile-1: tiles, 1d tensor of shape [1]
         CV_CheckEQ(input1_blob.total(), 1ull, "ONNX/Tile: tiles must be a 0D tensor or 1D tensor of shape [1].");
         int tiles = input1_blob.at<int>(0);
         // input2 in tile-1: axis, 1d tensor of shape [1]
-        Mat input2_blob = getBlob(node_proto, 2);
+        Mat input2_blob = getIntBlob(node_proto, 2);
         CV_CheckEQ(input2_blob.total(), 1ull, "ONNX/Tile: axis must be a 0D tensor or 1D tensor of shape [1].");
         int axis = input2_blob.at<int>(0);
         repeats_vec[axis] = tiles;
@@ -3056,11 +3099,11 @@ void ONNXImporter::parseTile(LayerParams& layerParams, const opencv_onnx::NodePr
     else
     {
         // input1 in tile>1: repeats
-        CV_CheckEQ(input1_blob.dims, 2, "ONNX/Tile: repeats must be a 1D tensor."); // 1D tensor is represented as a 2D Mat
+        CV_CheckLE(input1_blob.dims, 2, "ONNX/Tile: repeats must be a 1D tensor."); // 1D tensor is represented as a 2D Mat
         for (int i = 0; i < input1_blob.total(); i++)
             repeats_vec[i] = input1_blob.at<int>(i);
     }
-    layerParams.set("repeats", DictValue::arrayInt(repeats_vec.data(), repeats_vec.size()));
+    layerParams.set("repeats", DictValue::arrayInt(repeats_vec.data(), (int)repeats_vec.size()));
 
     if (all_const)
     {
@@ -3130,7 +3173,7 @@ void ONNXImporter::parseTopK(LayerParams& layerParams, const opencv_onnx::NodePr
         CV_CheckTrue(K_const, "OnnxImporter/TopK: K being non-constant is not supported");
 
         Mat input_K = getBlob(node_proto, 1);
-        int K = input_K.at<int>(0);
+        int K = static_cast<int>(input_K.at<int64_t>(0));
         layerParams.set("k", K);
     }
 
@@ -3162,6 +3205,21 @@ void ONNXImporter::parseSimpleLayers(LayerParams& layerParams, const opencv_onnx
         if (layer_id.find(node_proto.input(j)) == layer_id.end())
             layerParams.blobs.push_back(getBlob(node_proto, j));
     }
+    addLayer(layerParams, node_proto);
+}
+
+void ONNXImporter::parseHardmax(LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto)
+{
+    layerParams.type = "Hardmax";
+    addLayer(layerParams, node_proto);
+}
+
+void ONNXImporter::parseGatherND(LayerParams& layerParams, const opencv_onnx::NodeProto& node_proto)
+{
+    CV_Assert(node_proto.input_size() == 2);
+    layerParams.type = "GatherND";
+    int batch_dims = layerParams.get<int>("batch_dims", 0);
+    layerParams.set("batch_dims", batch_dims);
     addLayer(layerParams, node_proto);
 }
 
@@ -3356,7 +3414,7 @@ void ONNXImporter::parseQConv(LayerParams& layerParams, const opencv_onnx::NodeP
             padLp.type = "PaddingInt8";
             padLp.set("paddings", DictValue::arrayInt(&paddings[0], paddings.size()));
             padLp.set("depth", CV_8S);
-            padLp.set("value", inp_zp);
+            padLp.set<double>("value", (double)inp_zp);
 
             opencv_onnx::NodeProto proto;
             proto.add_input(node_proto.input(0));
@@ -3951,12 +4009,14 @@ void ONNXImporter::buildDispatchMap_ONNX_AI(int opset_version)
 
     dispatch["Equal"] = dispatch["Greater"] = dispatch["Less"] = dispatch["Pow"] = dispatch["Add"] =
             dispatch["Sub"] = dispatch["Mul"] = dispatch["Div"] = dispatch["GreaterOrEqual"] =
-            dispatch["LessOrEqual"] = dispatch["Mod"] = &ONNXImporter::parseElementWise;
+            dispatch["LessOrEqual"] = dispatch["Mod"] = dispatch["And"] = dispatch["Or"] = dispatch["Xor"] = &ONNXImporter::parseElementWise;
 
     dispatch["Sum"] = dispatch["Min"] = dispatch["Max"] = dispatch["Mean"] = &ONNXImporter::parseElementWise;
     dispatch["Where"] = &ONNXImporter::parseElementWise;
     dispatch["Range"] = &ONNXImporter::parseRange;
     dispatch["Einsum"] = &ONNXImporter::parseEinsum;
+    dispatch["Hardmax"] = &ONNXImporter::parseHardmax;
+    dispatch["GatherND"] = &ONNXImporter::parseGatherND;
 
     std::vector<std::string> simpleLayers{"Acos", "Acosh", "Asin", "Asinh", "Atan", "Atanh", "Ceil", "Celu", "Cos",
                                           "Cosh", "Dropout", "Erf", "Exp", "Floor", "HardSigmoid", "HardSwish",
@@ -4029,7 +4089,7 @@ Mat readTensorFromONNX(const String& path)
     {
         CV_Error(Error::StsUnsupportedFormat, cv::format("Failed to parse ONNX data: %s", path.c_str()));
     }
-    Mat mat = getMatFromTensor(tensor_proto);
+    Mat mat = getMatFromTensor(tensor_proto, false);
     releaseONNXTensor(tensor_proto);
     return mat;
 }

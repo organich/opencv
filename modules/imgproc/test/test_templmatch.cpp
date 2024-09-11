@@ -341,5 +341,4 @@ INSTANTIATE_TEST_CASE_P(/**/,
             testing::Values(1, 3),
             testing::Values(TM_SQDIFF, TM_SQDIFF_NORMED, TM_CCORR, TM_CCORR_NORMED, TM_CCOEFF, TM_CCOEFF_NORMED)));
 
-
 }} // namespace

@@ -49,7 +49,7 @@
 #include <type_traits>
 
 #include "precomp.hpp"
-#include "opencv2/imgproc/imgproc_c.h"
+#include "opencv2/core/core_c.h"
 #include "opencv2/photo/legacy/constants_c.h"
 
 #undef CV_MAT_ELEM_PTR_FAST

@@ -45,7 +45,6 @@
 #include "opencl_kernels_imgproc.hpp"
 #include "opencv2/core/hal/intrin.hpp"
 
-#include "opencv2/core/openvx/ovx_defs.hpp"
 
 namespace cv
 {
@@ -1266,85 +1265,6 @@ static bool ocl_pyrUp( InputArray _src, OutputArray _dst, const Size& _dsz, int 
 
 }
 
-#ifdef HAVE_OPENVX
-namespace cv
-{
-static bool openvx_pyrDown( InputArray _src, OutputArray _dst, const Size& _dsz, int borderType )
-{
-    using namespace ivx;
-
-    Mat srcMat = _src.getMat();
-
-    if (ovx::skipSmallImages<VX_KERNEL_HALFSCALE_GAUSSIAN>(srcMat.cols, srcMat.rows))
-        return false;
-
-    CV_Assert(!srcMat.empty());
-
-    Size ssize = _src.size();
-    Size acceptableSize = Size((ssize.width + 1) / 2, (ssize.height + 1) / 2);
-
-    // OpenVX limitations
-    if((srcMat.type() != CV_8U) ||
-       (borderType != BORDER_REPLICATE) ||
-       (_dsz != acceptableSize && !_dsz.empty()))
-        return false;
-
-    // The only border mode which is supported by both cv::pyrDown() and OpenVX
-    // and produces predictable results
-    ivx::border_t borderMode;
-    borderMode.mode = VX_BORDER_REPLICATE;
-
-    _dst.create( acceptableSize, srcMat.type() );
-    Mat dstMat = _dst.getMat();
-
-    CV_Assert( ssize.width > 0 && ssize.height > 0 &&
-            std::abs(acceptableSize.width*2 - ssize.width) <= 2 &&
-            std::abs(acceptableSize.height*2 - ssize.height) <= 2 );
-
-    try
-    {
-        Context context = ovx::getOpenVXContext();
-        if(context.vendorID() == VX_ID_KHRONOS)
-        {
-            // This implementation performs floor-like rounding
-            // (OpenCV uses floor(x+0.5)-like rounding)
-            // and ignores border mode (and loses 1px size border)
-            return false;
-        }
-
-        Image srcImg = Image::createFromHandle(context, Image::matTypeToFormat(srcMat.type()),
-                                               Image::createAddressing(srcMat), (void*)srcMat.data);
-        Image dstImg = Image::createFromHandle(context, Image::matTypeToFormat(dstMat.type()),
-                                               Image::createAddressing(dstMat), (void*)dstMat.data);
-
-        ivx::Scalar kernelSize = ivx::Scalar::create<VX_TYPE_INT32>(context, 5);
-        Graph graph = Graph::create(context);
-        ivx::Node halfNode = ivx::Node::create(graph, VX_KERNEL_HALFSCALE_GAUSSIAN, srcImg, dstImg, kernelSize);
-        halfNode.setBorder(borderMode);
-        graph.verify();
-        graph.process();
-
-#ifdef VX_VERSION_1_1
-        //we should take user memory back before release
-        //(it's not done automatically according to standard)
-        srcImg.swapHandle(); dstImg.swapHandle();
-#endif
-    }
-    catch (const RuntimeError & e)
-    {
-        VX_DbgThrow(e.what());
-    }
-    catch (const WrapperError & e)
-    {
-        VX_DbgThrow(e.what());
-    }
-
-    return true;
-}
-
-}
-#endif
-
 void cv::pyrDown( InputArray _src, OutputArray _dst, const Size& _dsz, int borderType )
 {
     CV_INSTRUMENT_REGION();
@@ -1353,9 +1273,6 @@ void cv::pyrDown( InputArray _src, OutputArray _dst, const Size& _dsz, int borde
 
     CV_OCL_RUN(_src.dims() <= 2 && _dst.isUMat(),
                ocl_pyrDown(_src, _dst, _dsz, borderType))
-
-    CV_OVX_RUN(_src.dims() <= 2,
-               openvx_pyrDown(_src, _dst, _dsz, borderType))
 
     Mat src = _src.getMat();
     Size dsz = _dsz.empty() ? Size((src.cols + 1)/2, (src.rows + 1)/2) : _dsz;
@@ -1641,113 +1558,3 @@ void cv::buildPyramid( InputArray _src, OutputArrayOfArrays _dst, int maxlevel, 
     for( ; i <= maxlevel; i++ )
         pyrDown( _dst.getMatRef(i-1), _dst.getMatRef(i), Size(), borderType );
 }
-
-CV_IMPL void cvPyrDown( const void* srcarr, void* dstarr, int _filter )
-{
-    cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr);
-
-    CV_Assert( _filter == CV_GAUSSIAN_5x5 && src.type() == dst.type());
-    cv::pyrDown( src, dst, dst.size() );
-}
-
-CV_IMPL void cvPyrUp( const void* srcarr, void* dstarr, int _filter )
-{
-    cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr);
-
-    CV_Assert( _filter == CV_GAUSSIAN_5x5 && src.type() == dst.type());
-    cv::pyrUp( src, dst, dst.size() );
-}
-
-
-CV_IMPL void
-cvReleasePyramid( CvMat*** _pyramid, int extra_layers )
-{
-    if( !_pyramid )
-        CV_Error( cv::Error::StsNullPtr, "" );
-
-    if( *_pyramid )
-        for( int i = 0; i <= extra_layers; i++ )
-            cvReleaseMat( &(*_pyramid)[i] );
-
-    cvFree( _pyramid );
-}
-
-
-CV_IMPL CvMat**
-cvCreatePyramid( const CvArr* srcarr, int extra_layers, double rate,
-                 const CvSize* layer_sizes, CvArr* bufarr,
-                 int calc, int filter )
-{
-    const float eps = 0.1f;
-    uchar* ptr = 0;
-
-    CvMat stub, *src = cvGetMat( srcarr, &stub );
-
-    if( extra_layers < 0 )
-        CV_Error( cv::Error::StsOutOfRange, "The number of extra layers must be non negative" );
-
-    int i, layer_step, elem_size = CV_ELEM_SIZE(src->type);
-    cv::Size layer_size, size = cvGetMatSize(src);
-
-    if( bufarr )
-    {
-        CvMat bstub, *buf;
-        int bufsize = 0;
-
-        buf = cvGetMat( bufarr, &bstub );
-        bufsize = buf->rows*buf->cols*CV_ELEM_SIZE(buf->type);
-        layer_size = size;
-        for( i = 1; i <= extra_layers; i++ )
-        {
-            if( !layer_sizes )
-            {
-                layer_size.width = cvRound(layer_size.width*rate+eps);
-                layer_size.height = cvRound(layer_size.height*rate+eps);
-            }
-            else
-                layer_size = layer_sizes[i-1];
-            layer_step = layer_size.width*elem_size;
-            bufsize -= layer_step*layer_size.height;
-        }
-
-        if( bufsize < 0 )
-            CV_Error( cv::Error::StsOutOfRange, "The buffer is too small to fit the pyramid" );
-        ptr = buf->data.ptr;
-    }
-
-    CvMat** pyramid = (CvMat**)cvAlloc( (extra_layers+1)*sizeof(pyramid[0]) );
-    memset( pyramid, 0, (extra_layers+1)*sizeof(pyramid[0]) );
-
-    pyramid[0] = cvCreateMatHeader( size.height, size.width, src->type );
-    cvSetData( pyramid[0], src->data.ptr, src->step );
-    layer_size = size;
-
-    for( i = 1; i <= extra_layers; i++ )
-    {
-        if( !layer_sizes )
-        {
-            layer_size.width = cvRound(layer_size.width*rate + eps);
-            layer_size.height = cvRound(layer_size.height*rate + eps);
-        }
-        else
-            layer_size = layer_sizes[i];
-
-        if( bufarr )
-        {
-            pyramid[i] = cvCreateMatHeader( layer_size.height, layer_size.width, src->type );
-            layer_step = layer_size.width*elem_size;
-            cvSetData( pyramid[i], ptr, layer_step );
-            ptr += layer_step*layer_size.height;
-        }
-        else
-            pyramid[i] = cvCreateMat( layer_size.height, layer_size.width, src->type );
-
-        if( calc )
-            cvPyrDown( pyramid[i-1], pyramid[i], filter );
-            //cvResize( pyramid[i-1], pyramid[i], CV_INTER_LINEAR );
-    }
-
-    return pyramid;
-}
-
-/* End of file. */

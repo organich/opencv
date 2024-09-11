@@ -52,7 +52,6 @@
 #include "hal_replacement.hpp"
 #include <opencv2/core/utils/configuration.private.hpp>
 #include "opencv2/core/hal/intrin.hpp"
-#include "opencv2/core/openvx/ovx_defs.hpp"
 #include "opencv2/core/softfloat.hpp"
 #include "imgwarp.hpp"
 
@@ -1345,8 +1344,8 @@ private:
 static bool ocl_remap(InputArray _src, OutputArray _dst, InputArray _map1, InputArray _map2,
                       int interpolation, int borderType, const Scalar& borderValue)
 {
-    const bool hasRelativeFlag = ((interpolation & WARP_RELATIVE_MAP) != 0);
-    interpolation &= ~WARP_RELATIVE_MAP;
+    const bool hasRelativeFlag = ((interpolation & cv::WARP_RELATIVE_MAP) != 0);
+    interpolation &= ~cv::WARP_RELATIVE_MAP;
 
     const ocl::Device & dev = ocl::Device::getDefault();
     int cn = _src.channels(), type = _src.type(), depth = _src.depth(),
@@ -1573,94 +1572,6 @@ static bool ocl_logPolar(InputArray _src, OutputArray _dst,
 
 #endif
 
-#ifdef HAVE_OPENVX
-static bool openvx_remap(Mat src, Mat dst, Mat map1, Mat map2, int interpolation, const Scalar& borderValue)
-{
-    vx_interpolation_type_e inter_type;
-    switch (interpolation)
-    {
-    case INTER_LINEAR:
-#if VX_VERSION > VX_VERSION_1_0
-        inter_type = VX_INTERPOLATION_BILINEAR;
-#else
-        inter_type = VX_INTERPOLATION_TYPE_BILINEAR;
-#endif
-        break;
-    case INTER_NEAREST:
-/* NEAREST_NEIGHBOR mode disabled since OpenCV round half to even while OpenVX sample implementation round half up
-#if VX_VERSION > VX_VERSION_1_0
-        inter_type = VX_INTERPOLATION_NEAREST_NEIGHBOR;
-#else
-        inter_type = VX_INTERPOLATION_TYPE_NEAREST_NEIGHBOR;
-#endif
-        if (!map1.empty())
-            for (int y = 0; y < map1.rows; ++y)
-            {
-                float* line = map1.ptr<float>(y);
-                for (int x = 0; x < map1.cols; ++x)
-                    line[x] = cvRound(line[x]);
-            }
-        if (!map2.empty())
-            for (int y = 0; y < map2.rows; ++y)
-            {
-                float* line = map2.ptr<float>(y);
-                for (int x = 0; x < map2.cols; ++x)
-                    line[x] = cvRound(line[x]);
-            }
-        break;
-*/
-    case INTER_AREA://AREA interpolation mode is unsupported
-    default:
-        return false;
-    }
-
-    try
-    {
-        ivx::Context ctx = ovx::getOpenVXContext();
-
-        Mat a;
-        if (dst.data != src.data)
-            a = src;
-        else
-            src.copyTo(a);
-
-        ivx::Image
-            ia = ivx::Image::createFromHandle(ctx, VX_DF_IMAGE_U8,
-                ivx::Image::createAddressing(a.cols, a.rows, 1, (vx_int32)(a.step)), a.data),
-            ib = ivx::Image::createFromHandle(ctx, VX_DF_IMAGE_U8,
-                ivx::Image::createAddressing(dst.cols, dst.rows, 1, (vx_int32)(dst.step)), dst.data);
-
-        //ATTENTION: VX_CONTEXT_IMMEDIATE_BORDER attribute change could lead to strange issues in multi-threaded environments
-        //since OpenVX standard says nothing about thread-safety for now
-        ivx::border_t prevBorder = ctx.immediateBorder();
-        ctx.setImmediateBorder(VX_BORDER_CONSTANT, (vx_uint8)(borderValue[0]));
-
-        ivx::Remap map = ivx::Remap::create(ctx, src.cols, src.rows, dst.cols, dst.rows);
-        if (map1.empty()) map.setMappings(map2);
-        else if (map2.empty()) map.setMappings(map1);
-        else map.setMappings(map1, map2);
-        ivx::IVX_CHECK_STATUS(vxuRemap(ctx, ia, map, inter_type, ib));
-#ifdef VX_VERSION_1_1
-        ib.swapHandle();
-        ia.swapHandle();
-#endif
-
-        ctx.setImmediateBorder(prevBorder);
-    }
-    catch (const ivx::RuntimeError & e)
-    {
-        CV_Error(cv::Error::StsInternal, e.what());
-        return false;
-    }
-    catch (const ivx::WrapperError & e)
-    {
-        CV_Error(cv::Error::StsInternal, e.what());
-        return false;
-    }
-    return true;
-}
-#endif
-
 #if defined HAVE_IPP && !IPP_DISABLE_REMAP
 
 typedef IppStatus (CV_STDCALL * ippiRemap)(const void * pSrc, IppiSize srcSize, int srcStep, IppiRect srcRoi,
@@ -1721,9 +1632,9 @@ void cv::remap( InputArray _src, OutputArray _dst,
 {
     CV_INSTRUMENT_REGION();
 
-    const bool hasRelativeFlag = ((interpolation & WARP_RELATIVE_MAP) != 0);
+    const bool hasRelativeFlag = ((interpolation & cv::WARP_RELATIVE_MAP) != 0);
 
-    static RemapNNFunc nn_tab[2][8] =
+    static RemapNNFunc nn_tab[2][CV_DEPTH_MAX] =
     {
         {
             remapNearest<uchar, false>, remapNearest<schar, false>, remapNearest<ushort, false>, remapNearest<short, false>,
@@ -1735,7 +1646,7 @@ void cv::remap( InputArray _src, OutputArray _dst,
         }
     };
 
-    static RemapFunc linear_tab[2][8] =
+    static RemapFunc linear_tab[2][CV_DEPTH_MAX] =
     {
         {
             remapBilinear<FixedPtCast<int, uchar, INTER_REMAP_COEF_BITS>, RemapVec_8u<false>, short, false>, 0,
@@ -1753,7 +1664,7 @@ void cv::remap( InputArray _src, OutputArray _dst,
         }
     };
 
-    static RemapFunc cubic_tab[2][8] =
+    static RemapFunc cubic_tab[2][CV_DEPTH_MAX] =
     {
         {
             remapBicubic<FixedPtCast<int, uchar, INTER_REMAP_COEF_BITS>, short, INTER_REMAP_COEF_SCALE, false>, 0,
@@ -1799,16 +1710,6 @@ void cv::remap( InputArray _src, OutputArray _dst,
     _dst.create( map1.size(), src.type() );
     Mat dst = _dst.getMat();
 
-    CV_OVX_RUN(
-        src.type() == CV_8UC1 && dst.type() == CV_8UC1 &&
-        !ovx::skipSmallImages<VX_KERNEL_REMAP>(src.cols, src.rows) &&
-        (borderType& ~BORDER_ISOLATED) == BORDER_CONSTANT &&
-        ((map1.type() == CV_32FC2 && map2.empty() && map1.size == dst.size) ||
-         (map1.type() == CV_32FC1 && map2.type() == CV_32FC1 && map1.size == dst.size && map2.size == dst.size) ||
-         (map1.empty() && map2.type() == CV_32FC2 && map2.size == dst.size)) &&
-        ((borderType & BORDER_ISOLATED) != 0 || !src.isSubmatrix()) &&
-        !hasRelativeFlag,
-        openvx_remap(src, dst, map1, map2, interpolation, borderValue));
 
     CV_Assert( dst.cols < SHRT_MAX && dst.rows < SHRT_MAX && src.cols < SHRT_MAX && src.rows < SHRT_MAX );
 
@@ -1821,7 +1722,7 @@ void cv::remap( InputArray _src, OutputArray _dst,
                  map1.ptr<float>(), map1.step, map2.ptr<float>(), map2.step, interpolation, borderType, borderValue.val);
     }
 
-    interpolation &= ~WARP_RELATIVE_MAP;
+    interpolation &= ~cv::WARP_RELATIVE_MAP;
     if( interpolation == INTER_AREA )
         interpolation = INTER_LINEAR;
 
@@ -3640,100 +3541,6 @@ cv::Mat cv::getAffineTransform(InputArray _src, InputArray _dst)
     return getAffineTransform((const Point2f*)src.data, (const Point2f*)dst.data);
 }
 
-CV_IMPL void
-cvWarpAffine( const CvArr* srcarr, CvArr* dstarr, const CvMat* marr,
-              int flags, CvScalar fillval )
-{
-    cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr);
-    cv::Mat matrix = cv::cvarrToMat(marr);
-    CV_Assert( src.type() == dst.type() );
-    cv::warpAffine( src, dst, matrix, dst.size(), flags,
-        (flags & cv::WARP_FILL_OUTLIERS) ? cv::BORDER_CONSTANT : cv::BORDER_TRANSPARENT,
-        fillval );
-}
-
-CV_IMPL void
-cvWarpPerspective( const CvArr* srcarr, CvArr* dstarr, const CvMat* marr,
-                   int flags, CvScalar fillval )
-{
-    cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr);
-    cv::Mat matrix = cv::cvarrToMat(marr);
-    CV_Assert( src.type() == dst.type() );
-    cv::warpPerspective( src, dst, matrix, dst.size(), flags,
-        (flags & cv::WARP_FILL_OUTLIERS) ? cv::BORDER_CONSTANT : cv::BORDER_TRANSPARENT,
-        fillval );
-}
-
-CV_IMPL void
-cvRemap( const CvArr* srcarr, CvArr* dstarr,
-         const CvArr* _mapx, const CvArr* _mapy,
-         int flags, CvScalar fillval )
-{
-    cv::Mat src = cv::cvarrToMat(srcarr), dst = cv::cvarrToMat(dstarr), dst0 = dst;
-    cv::Mat mapx = cv::cvarrToMat(_mapx), mapy = cv::cvarrToMat(_mapy);
-    CV_Assert( src.type() == dst.type() && dst.size() == mapx.size() );
-    cv::remap( src, dst, mapx, mapy, flags & cv::INTER_MAX,
-        (flags & cv::WARP_FILL_OUTLIERS) ? cv::BORDER_CONSTANT : cv::BORDER_TRANSPARENT,
-        fillval );
-    CV_Assert( dst0.data == dst.data );
-}
-
-
-CV_IMPL CvMat*
-cv2DRotationMatrix( CvPoint2D32f center, double angle,
-                    double scale, CvMat* matrix )
-{
-    cv::Mat M0 = cv::cvarrToMat(matrix), M = cv::getRotationMatrix2D(center, angle, scale);
-    CV_Assert( M.size() == M0.size() );
-    M.convertTo(M0, M0.type());
-    return matrix;
-}
-
-
-CV_IMPL CvMat*
-cvGetPerspectiveTransform( const CvPoint2D32f* src,
-                          const CvPoint2D32f* dst,
-                          CvMat* matrix )
-{
-    cv::Mat M0 = cv::cvarrToMat(matrix),
-        M = cv::getPerspectiveTransform((const cv::Point2f*)src, (const cv::Point2f*)dst);
-    CV_Assert( M.size() == M0.size() );
-    M.convertTo(M0, M0.type());
-    return matrix;
-}
-
-
-CV_IMPL CvMat*
-cvGetAffineTransform( const CvPoint2D32f* src,
-                          const CvPoint2D32f* dst,
-                          CvMat* matrix )
-{
-    cv::Mat M0 = cv::cvarrToMat(matrix),
-        M = cv::getAffineTransform((const cv::Point2f*)src, (const cv::Point2f*)dst);
-    CV_Assert( M.size() == M0.size() );
-    M.convertTo(M0, M0.type());
-    return matrix;
-}
-
-
-CV_IMPL void
-cvConvertMaps( const CvArr* arr1, const CvArr* arr2, CvArr* dstarr1, CvArr* dstarr2 )
-{
-    cv::Mat map1 = cv::cvarrToMat(arr1), map2;
-    cv::Mat dstmap1 = cv::cvarrToMat(dstarr1), dstmap2;
-
-    if( arr2 )
-        map2 = cv::cvarrToMat(arr2);
-    if( dstarr2 )
-    {
-        dstmap2 = cv::cvarrToMat(dstarr2);
-        if( dstmap2.type() == CV_16SC1 )
-            dstmap2 = cv::Mat(dstmap2.size(), CV_16UC1, dstmap2.ptr(), dstmap2.step);
-    }
-
-    cv::convertMaps( map1, map2, dstmap1, dstmap2, dstmap1.type(), false );
-}
-
 /****************************************************************************************
 PkLab.net 2018 based on cv::linearPolar from OpenCV by J.L. Blanco, Apr 2009
 ****************************************************************************************/
@@ -3866,32 +3673,6 @@ void cv::logPolar( InputArray _src, OutputArray _dst,
     Size ssize = _src.size();
     double M = maxRadius > 0 ? std::exp(ssize.width / maxRadius) : 1;
     warpPolar(_src, _dst, ssize, center, M, flags | WARP_POLAR_LOG);
-}
-
-CV_IMPL
-void cvLinearPolar( const CvArr* srcarr, CvArr* dstarr,
-                    CvPoint2D32f center, double maxRadius, int flags )
-{
-    Mat src = cvarrToMat(srcarr);
-    Mat dst = cvarrToMat(dstarr);
-
-    CV_Assert(src.size == dst.size);
-    CV_Assert(src.type() == dst.type());
-
-    cv::linearPolar(src, dst, center, maxRadius, flags);
-}
-
-CV_IMPL
-void cvLogPolar( const CvArr* srcarr, CvArr* dstarr,
-                 CvPoint2D32f center, double M, int flags )
-{
-    Mat src = cvarrToMat(srcarr);
-    Mat dst = cvarrToMat(dstarr);
-
-    CV_Assert(src.size == dst.size);
-    CV_Assert(src.type() == dst.type());
-
-    cv::logPolar(src, dst, center, M, flags);
 }
 
 /* End of file. */

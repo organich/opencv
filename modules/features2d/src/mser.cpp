@@ -44,9 +44,9 @@
  */
 
 #include "precomp.hpp"
-#include "opencv2/imgproc/imgproc_c.h"
 #include <limits>
 #include "../3rdparty/mscr/chi_table.h"
+#include "opencv2/core/core_c.h"
 
 namespace cv
 {
@@ -265,7 +265,7 @@ public:
             if( checked )
                 return;
             checked = true;
-            if( size < wp.p.minArea || size > wp.p.maxArea || var < 0.f || var > wp.p.maxVariation )
+            if( size < wp.p.minArea || size > wp.p.maxArea || var < wp.p.minDiversity || var > wp.p.maxVariation )
                 return;
             if( child_ )
             {

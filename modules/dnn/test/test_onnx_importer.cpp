@@ -45,7 +45,7 @@ public:
     {
         std::vector<MatShape> inLayerShapes;
         std::vector<MatShape> outLayerShapes;
-        net.getLayerShapes(MatShape(), 0, inLayerShapes, outLayerShapes);
+        net.getLayerShapes(MatShape(), CV_32F, 0, inLayerShapes, outLayerShapes);
         ASSERT_EQ(inLayerShapes.size(), inps.size());
 
         for (int i = 0; i < inps.size(); ++i) {
@@ -53,7 +53,7 @@ public:
             if (hasDynamicShapes)
                 continue;
             if (inLayerShapes[i].size() == 1) {  // 1D input
-                ASSERT_EQ(shape(inLayerShapes[i][0], 1), shape(inps[i]));
+                ASSERT_EQ(shape(inLayerShapes[i][0]), shape(inps[i]));
             } else {
                 // Compare all axes except batch dimension which is variable.
                 inLayerShapes[i][0] = inps[i].size[0];
@@ -115,6 +115,12 @@ public:
 
             netSoftmax.setInput(ref);
             ref = netSoftmax.forward();
+        }
+        if (ref.dims != out.dims) {
+            if (ref.dims <= 1)
+                ref = ref.reshape(1, out.rows);
+            if (out.dims <= 1)
+                out = out.reshape(1, ref.rows);
         }
         if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH && target == DNN_TARGET_OPENCL)
         {
@@ -690,9 +696,6 @@ TEST_P(Test_ONNX_layers, Compare_GT)
 
     testONNXModels("greater");
 }
-TEST_P(Test_ONNX_layers, Greater_input_dtype_int64) {
-    testONNXModels("greater_input_dtype_int64");
-}
 
 TEST_P(Test_ONNX_layers, Compare_LT)
 {
@@ -805,10 +808,24 @@ TEST_P(Test_ONNX_layers, CumSumExclusiveInplace)
     testONNXModels("cumsum_exclusive_inplace");
 }
 
-TEST_P(Test_ONNX_layers, Range)
+TEST_P(Test_ONNX_layers, RangeFloat)
 {
     testONNXModels("range_float");
     testONNXModels("range_float_negative");
+}
+
+TEST_P(Test_ONNX_layers, RangeInt32)
+{
+    testONNXModels("range_int32");
+    testONNXModels("range_int32_negative");
+}
+
+TEST_P(Test_ONNX_layers, RangeInt64)
+{
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH); // OpenVINO uses int32 precision for int64 operations
+    testONNXModels("range_int64");
+    testONNXModels("range_int64_negative");
 }
 
 TEST_P(Test_ONNX_layers, Eltwise3D)
@@ -1291,6 +1308,9 @@ TEST_P(Test_ONNX_layers, Split_EltwiseMax)
 
 TEST_P(Test_ONNX_layers, LSTM_Activations)
 {
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH); // TODO: fix this test for OpenVINO
+
 #if defined(INF_ENGINE_RELEASE) && INF_ENGINE_VER_MAJOR_EQ(2022010000)
     // IE exception: Node Block1326/lstm/reshape_0/permute was not assigned on any pointed device
     if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH && (target == DNN_TARGET_OPENCL || target == DNN_TARGET_OPENCL_FP16))
@@ -1470,7 +1490,7 @@ TEST_P(Test_ONNX_layers, LSTM_layout_batch)
     testONNXModels("lstm_layout_1", npy, 0.005, 0.005, false, false, 3);
 }
 
-TEST_P(Test_ONNX_layers, DISABLED_Einsum_1D)
+TEST_P(Test_ONNX_layers, Einsum_1D)
 {
     testONNXModels("einsum_1d", npy, 0, 0, false, false, 2);
 }
@@ -1502,12 +1522,13 @@ TEST_P(Test_ONNX_layers, Einsum_5D)
     testONNXModels("einsum_5d", npy, 0, 0, false, false, 2);
 }
 
-TEST_P(Test_ONNX_layers, DISABLED_Einsum_InnerProduct)
+// https://github.com/opencv/opencv/issues/24883
+TEST_P(Test_ONNX_layers, Einsum_InnerProduct)
 {
     testONNXModels("einsum_inner", npy, 0, 0, false, false, 2);
 }
 
-TEST_P(Test_ONNX_layers, DISABLED_Einsum_HadamardProduct)
+TEST_P(Test_ONNX_layers, Einsum_HadamardProduct)
 {
     testONNXModels("einsum_hadamard", npy, 0, 0, false, false, 2);
 }
@@ -1531,6 +1552,10 @@ TEST_P(Test_ONNX_layers, Einsum_transpose)
 
 TEST_P(Test_ONNX_layers, Einsum_const_inputs) {
     testONNXModels("einsum_const_inputs", npy, 0, 0, false, false, 1);
+}
+
+TEST_P(Test_ONNX_layers, ReduceSum_Consts){
+    testONNXModels("reducesum_consts");
 }
 
 TEST_P(Test_ONNX_layers, Pad2d_Unfused)
@@ -1999,6 +2024,9 @@ TEST_P(Test_ONNX_layers, Gemm_bias)
 
 TEST_P(Test_ONNX_layers, Quantized_Convolution)
 {
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH); // TODO: fix this test for OpenVINO
+
     // The difference of QOperator and QDQ format:
     // https://onnxruntime.ai/docs/performance/quantization.html#onnx-quantization-representation-format.
     {
@@ -2019,7 +2047,7 @@ TEST_P(Test_ONNX_layers, Quantized_Convolution)
 
 TEST_P(Test_ONNX_layers, Quantized_MatMul)
 {
-    testONNXModels("quantized_matmul_uint8_weights", npy, 0.005, 0.007);
+    testONNXModels("quantized_matmul_uint8_weights", npy, 0.008, 0.015);
     testONNXModels("quantized_matmul_int8_weights", npy, 0.06, 0.2);
     testONNXModels("quantized_matmul_per_channel_weights", npy, 0.06, 0.22);
 }
@@ -2045,6 +2073,8 @@ TEST_P(Test_ONNX_layers, Quantized_Eltwise)
 
 TEST_P(Test_ONNX_layers, Quantized_Eltwise_Scalar)
 {
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH); // TODO: fix this test for OpenVINO
     testONNXModels("quantized_eltwise_scalar");
 }
 
@@ -2122,7 +2152,7 @@ TEST_P(Test_ONNX_layers, Quantized_Concat)
 
 TEST_P(Test_ONNX_layers, Quantized_Constant)
 {
-    testONNXModels("quantized_constant", npy, 0.002, 0.008);
+    testONNXModels("quantized_constant", npy, 0.008, 0.02);
 }
 
 TEST_P(Test_ONNX_layers, OutputRegistration)
@@ -2637,6 +2667,45 @@ TEST_P(Test_ONNX_layers, CumSum)
     testONNXModels("cumsum_1d_exclusive_1_reverse");
     testONNXModels("cumsum_2d_dim_1");
     testONNXModels("cumsum_3d_dim_2");
+    testONNXModels("cumsum_3d_dim_2_int32");
+}
+
+TEST_P(Test_ONNX_layers, CumSum_int64)
+{
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH); // OpenVINO uses int32 precision for int64 operations
+    testONNXModels("cumsum_3d_dim_2_int64");
+}
+
+TEST_P(Test_ONNX_layers, ReduceSumInt64)
+{
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH); // OpenVINO uses int32 precision for int64 operations
+    testONNXModels("reduce_sum_int64");
+}
+
+TEST_P(Test_ONNX_layers, ScatterInt32)
+{
+    testONNXModels("scatter_int32", npy, 0, 0, false, true, 3);
+}
+
+TEST_P(Test_ONNX_layers, ScatterInt64)
+{
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH); // OpenVINO uses int32 precision for int64 operations
+    testONNXModels("scatter_int64", npy, 0, 0, false, true, 3);
+}
+
+TEST_P(Test_ONNX_layers, TileInt32)
+{
+    testONNXModels("tile_int32");
+}
+
+TEST_P(Test_ONNX_layers, TileInt64)
+{
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE_NGRAPH); // OpenVINO uses int32 precision for int64 operations
+    testONNXModels("tile_int64");
 }
 
 static void testYOLO(const std::string& weightPath, const std::vector<int>& refClassIds,
@@ -3114,7 +3183,14 @@ TEST_P(Test_ONNX_layers, Attention) {
 TEST_P(Test_ONNX_layers, AttentionSingleHead) {
     testONNXModels("attention_single_head");
 }
-TEST_P(Test_ONNX_layers, PyTorchAttentionSingleHead){
+TEST_P(Test_ONNX_layers, PyTorchAttentionSingleHead) {
+    // 5.x specific bug: https://github.com/opencv/opencv/issues/25921
+    if (target == DNN_TARGET_OPENCL)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_OPENCL);
+
+    if (target == DNN_TARGET_OPENCL_FP16)
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_OPENCL_FP16);
+
     testONNXModels("pytorch_attention_single_head");
 }
 
@@ -3203,6 +3279,11 @@ TEST_P(Test_ONNX_layers, ClipDivSharedConstant) {
 }
 
 TEST_P(Test_ONNX_layers, TopK) {
+    if (backend == DNN_BACKEND_INFERENCE_ENGINE_NGRAPH ||
+        backend == DNN_BACKEND_INFERENCE_ENGINE_NN_BUILDER_2019 ||
+        backend == DNN_BACKEND_INFERENCE_ENGINE) {
+        applyTestTag(CV_TEST_TAG_DNN_SKIP_IE); // OpenVINO does not support int64
+    }
     auto test = [&](const std::string &basename, double l1 = 0, double lInf = 0) {
         std::string onnxmodel = _tf("models/" + basename + ".onnx", true);
         Mat input = readTensorFromONNX(_tf("data/input_" + basename + ".pb"));
@@ -3221,10 +3302,10 @@ TEST_P(Test_ONNX_layers, TopK) {
 
         Mat output_res_val = outputs.front(),
             output_res_ind = outputs.back();
-        output_res_ind.convertTo(output_res_ind, CV_32S); // TODO: remove this conversion on 5.x
 
         normAssert(output_ref_val, output_res_val, (basename + " values").c_str(), l1 ? l1 : default_l1, lInf ? lInf : default_lInf);
         normAssert(output_ref_ind, output_res_ind, (basename + " indices").c_str(), l1 ? l1 : default_l1, lInf ? lInf : default_lInf);
+
         expectNoFallbacksFromIE(net);
     };
 

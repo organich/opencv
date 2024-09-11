@@ -767,7 +767,7 @@ PERF_TEST_P_(PatchNaNsFixture, PatchNaNs)
 {
     const Size_MatType_t params = GetParam();
     Size srcSize = get<0>(params);
-    const int type = get<1>(params), cn = CV_MAT_CN(type);
+    const int type = get<1>(params), cn = CV_MAT_CN(type), depth = CV_MAT_DEPTH(type);
 
     Mat src(srcSize, type);
     declare.in(src, WARMUP_RNG).out(src);
@@ -779,9 +779,17 @@ PERF_TEST_P_(PatchNaNsFixture, PatchNaNs)
         for (int y = 0; y < srcSize.height; ++y)
         {
             float  *const ptrf = src.ptr<float>(y);
+            double *const ptrd = src.ptr<double>(y);
             for (int x = 0; x < srcSize.width; ++x)
             {
-                ptrf[x] = (x + y) % 2 == 0 ? randomNan<float >(rng) : ptrf[x];
+                if (depth == CV_32F)
+                {
+                    ptrf[x] = (x + y) % 2 == 0 ? randomNan<float >(rng) : ptrf[x];
+                }
+                else if (depth == CV_64F)
+                {
+                    ptrd[x] = (x + y) % 2 == 0 ? randomNan<double>(rng) : ptrd[x];
+                }
             }
         }
     }
@@ -794,8 +802,65 @@ PERF_TEST_P_(PatchNaNsFixture, PatchNaNs)
 INSTANTIATE_TEST_CASE_P(/*nothing*/ , PatchNaNsFixture,
     testing::Combine(
         testing::Values(szVGA, sz720p, sz1080p, sz2160p),
-        testing::Values(CV_32FC1, CV_32FC2, CV_32FC3, CV_32FC4)
+        testing::Values(CV_32FC1, CV_32FC2, CV_32FC3, CV_32FC4, CV_64FC1, CV_64FC2, CV_64FC3, CV_64FC4)
     )
 );
+
+
+////////////// finiteMask ////////////////////////
+
+typedef Size_MatType FiniteMaskFixture;
+
+PERF_TEST_P_(FiniteMaskFixture, FiniteMask)
+{
+    const Size_MatType_t params = GetParam();
+    Size srcSize = get<0>(params);
+    const int type = get<1>(params), cn = CV_MAT_CN(type), depth = CV_MAT_DEPTH(type);
+
+    Mat src(srcSize, type);
+    Mat mask(srcSize, CV_8UC1);
+    declare.in(src, WARMUP_RNG).out(mask);
+
+    // generating NaNs
+    {
+        srcSize.width *= cn;
+        const softfloat  fpinf = softfloat ::inf();
+        const softfloat  fninf = softfloat ::inf().setSign(true);
+        const softdouble dpinf = softdouble::inf();
+        const softdouble dninf = softdouble::inf().setSign(true);
+        RNG& rng = theRNG();
+        for (int y = 0; y < srcSize.height; ++y)
+        {
+            float  *const ptrf = src.ptr<float>(y);
+            double *const ptrd = src.ptr<double>(y);
+            for (int x = 0; x < srcSize.width; ++x)
+            {
+                int rem = (x + y) % 10;
+                if (depth == CV_32F)
+                {
+                    ptrf[x] = rem <  4 ? randomNan<float >(rng) :
+                              rem == 5 ? (float )((x + y)%2 ? fpinf : fninf) : ptrf[x];
+                }
+                else if (depth == CV_64F)
+                {
+                    ptrd[x] = rem <  4 ? randomNan<double>(rng) :
+                              rem == 5 ? (double)((x + y)%2 ? dpinf : dninf) : ptrd[x];
+                }
+            }
+        }
+    }
+
+    TEST_CYCLE() cv::finiteMask(src, mask);
+
+    SANITY_CHECK(mask);
+}
+
+INSTANTIATE_TEST_CASE_P(/*nothing*/ , FiniteMaskFixture,
+    testing::Combine(
+        testing::Values(szVGA, sz720p, sz1080p, sz2160p),
+        testing::Values(CV_32FC1, CV_32FC2, CV_32FC3, CV_32FC4, CV_64FC1, CV_64FC2, CV_64FC3, CV_64FC4)
+    )
+);
+
 
 } // namespace

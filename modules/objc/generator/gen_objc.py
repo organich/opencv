@@ -416,6 +416,7 @@ class ClassInfo(GeneralInfo):
     def generateObjcBodyCode(self, m, M):
         return Template(self.objc_body_template + "\n\n").substitute(
                             module = M,
+                            objcname = make_objcname(M),
                             nativePointerHandling=Template(
 """
 - (instancetype)initWithNativePtr:(cv::Ptr<$cName>)nativePtr {
@@ -432,14 +433,14 @@ class ClassInfo(GeneralInfo):
 """
                             ).substitute(
                                 cName = self.fullName(isCPP=True),
-                                objcName = self.objc_name,
+                                objcName = make_objcname(self.objc_name),
                                 native_ptr_name = self.native_ptr_name,
                                 init_call = "init" if self.is_base_class else "initWithNativePtr:nativePtr"
                             ),
                             manualMethodDeclations = "",
                             methodImplementations = self.method_implementations.getvalue(),
                             name = self.name,
-                            objcName = self.objc_name,
+                            objcName = make_objcname(self.objc_name),
                             cName = self.cname,
                             imports = "\n".join(self.getImports(M)),
                             docs = gen_class_doc(self.docstring, M, self.member_classes, self.member_enums),

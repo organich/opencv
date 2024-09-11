@@ -458,7 +458,7 @@ void transform(InputArray _src, OutputArray _dst, InputArray _mtx)
     CV_Assert( scn == m.cols || scn + 1 == m.cols );
     bool isDiag = false;
 
-    _dst.create( src.size(), CV_MAKETYPE(depth, dcn) );
+    _dst.createSameSize( src, CV_MAKETYPE(depth, dcn) );
     Mat dst = _dst.getMat();
 
     if (src.data == dst.data)  // inplace case
@@ -550,7 +550,7 @@ void perspectiveTransform(InputArray _src, OutputArray _dst, InputArray _mtx)
     CV_Assert( scn + 1 == m.cols );
     CV_Assert( depth == CV_32F || depth == CV_64F );
 
-    _dst.create( src.size(), CV_MAKETYPE(depth, dcn) );
+    _dst.createSameSize( src, CV_MAKETYPE(depth, dcn) );
     Mat dst = _dst.getMat();
 
     const int mtype = CV_64F;
@@ -647,7 +647,7 @@ void scaleAdd(InputArray _src1, double alpha, InputArray _src2, OutputArray _dst
     CV_OCL_RUN(_src1.dims() <= 2 && _src2.dims() <= 2 && _dst.isUMat(),
             ocl_scaleAdd(_src1, alpha, _src2, _dst, type))
 
-    if( depth < CV_32F )
+    if( depth != CV_32F && depth != CV_64F )
     {
         addWeighted(_src1, alpha, _src2, 1, 0, _dst, depth);
         return;
@@ -1230,7 +1230,7 @@ cvCalcPCA( const CvArr* data_arr, CvArr* avg_arr, CvArr* eigenvals, CvArr* eigen
     pca.eigenvalues = evals;
     pca.eigenvectors = evects;
 
-    pca(data, (flags & CV_PCA_USE_AVG) ? mean : cv::Mat(),
+    pca(data, (flags & cv::PCA::USE_AVG) ? mean : cv::Mat(),
         flags, !evals.empty() ? evals.rows + evals.cols - 1 : 0);
 
     if( pca.mean.size() == mean.size() )

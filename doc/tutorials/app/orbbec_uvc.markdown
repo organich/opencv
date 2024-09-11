@@ -14,7 +14,7 @@ Using Orbbec 3D cameras (UVC) {#tutorial_orbbec_uvc}
 ### Introduction
 This tutorial is devoted to the Orbbec 3D cameras based on UVC protocol. For the use of the older
 Orbbec 3D cameras which depends on OpenNI, please refer to the
-[previous tutorial](https://github.com/opencv/opencv/blob/4.x/doc/tutorials/app/orbbec_astra_openni.markdown).
+[previous tutorial](https://github.com/opencv/opencv/blob/5.x/doc/tutorials/app/orbbec_astra_openni.markdown).
 
 Unlike working with the OpenNI based Astra 3D cameras which requires OpenCV built with OpenNI2 SDK,
 Orbbec SDK is not required to be installed for accessing Orbbec UVC 3D cameras via OpenCV. By using
@@ -39,14 +39,14 @@ Code
 
 @add_toggle_python
 This tutorial code's is shown lines below. You can also download it from
-[here](https://github.com/opencv/opencv/blob/4.x/samples/python/videocapture_obsensor.py)
-@include samples/python/videocapture_obsensor.py
+[here](https://github.com/opencv/opencv/blob/5.x/samples/python/tutorial_code/videoio/videocapture_obsensor.py)
+@include samples/python/tutorial_code/videoio/videocapture_obsensor.py
 @end_toggle
 
 @add_toggle_cpp
 This tutorial code's is shown lines below. You can also download it from
-[here](https://github.com/opencv/opencv/blob/4.x/samples/cpp/videocapture_obsensor.cpp)
-@include samples/cpp/videocapture_obsensor.cpp
+[here](https://github.com/opencv/opencv/blob/5.x/samples/cpp/tutorial_code/videoio/uvc_orbbec/videocapture_obsensor.cpp)
+@include samples/cpp/tutorial_code/videoio/uvc_orbbec/videocapture_obsensor.cpp
 @end_toggle
 
 ### Code Explanation
@@ -123,4 +123,4 @@ This tutorial code's is shown lines below. You can also download it from
 ![BGR And DEPTH And DepthToColor frame](images/orbbec_uvc_cpp.jpg)
 
 ### Note
-Mac users need sudo privileges to execute the code.
+Mac users need `sudo` privileges to execute the code.

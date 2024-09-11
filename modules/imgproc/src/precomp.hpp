@@ -46,7 +46,6 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/core/utility.hpp"
 
-#include "opencv2/imgproc/imgproc_c.h"
 #include "opencv2/core/private.hpp"
 #include "opencv2/core/ocl.hpp"
 #include "opencv2/core/hal/hal.hpp"
@@ -104,20 +103,9 @@ static inline IppiInterpolationType ippiGetInterpolation(int inter)
 }
 #endif
 
-#include "_geom.h"
 #include "filterengine.hpp"
 
 #include "opencv2/core/sse_utils.hpp"
-
-inline bool isStorageOrMat(void * arr)
-{
-    if (CV_IS_STORAGE( arr ))
-        return true;
-    else if (CV_IS_MAT( arr ))
-        return false;
-    CV_Error( cv::Error::StsBadArg, "Destination is not CvMemStorage* nor CvMat*" );
-}
-
 
 namespace cv {
 

@@ -109,11 +109,9 @@ imgproc = {
     ],
 }
 
-objdetect = {'': ['groupRectangles', 'getPredefinedDictionary', 'extendDictionary',
+objdetect = {'': ['getPredefinedDictionary', 'extendDictionary',
                   'drawDetectedMarkers', 'generateImageMarker', 'drawDetectedCornersCharuco',
                   'drawDetectedDiamonds'],
-             'HOGDescriptor': ['load', 'HOGDescriptor', 'getDefaultPeopleDetector', 'getDaimlerPeopleDetector', 'setSVMDetector', 'detectMultiScale'],
-             'CascadeClassifier': ['load', 'detectMultiScale2', 'CascadeClassifier', 'detectMultiScale3', 'empty', 'detectMultiScale'],
              'GraphicalCodeDetector': ['decode', 'detect', 'detectAndDecode', 'detectMulti', 'decodeMulti', 'detectAndDecodeMulti'],
              'QRCodeDetector': ['QRCodeDetector', 'decode', 'detect', 'detectAndDecode', 'detectMulti', 'decodeMulti', 'detectAndDecodeMulti', 'decodeCurved', 'detectAndDecodeCurved', 'setEpsX', 'setEpsY'],
              'aruco_PredefinedDictionaryType': [],
@@ -150,7 +148,7 @@ video = {
 }
 
 dnn = {'dnn_Net': ['setInput', 'forward', 'setPreferableBackend','getUnconnectedOutLayersNames'],
-       '': ['readNetFromCaffe', 'readNetFromTensorflow', 'readNetFromTorch', 'readNetFromDarknet',
+       '': ['readNetFromCaffe', 'readNetFromTensorflow', 'readNetFromDarknet',
             'readNetFromONNX', 'readNetFromTFLite', 'readNet', 'blobFromImage']}
 
 features2d = {'Feature2D': ['detect', 'compute', 'detectAndCompute', 'descriptorSize', 'descriptorType', 'defaultNorm', 'empty', 'getDefaultName'],
@@ -189,7 +187,7 @@ photo = {'': ['createAlignMTB', 'createCalibrateDebevec', 'createCalibrateRobert
                              'getColorAdaptation', 'setColorAdaptation']
         }
 
-calib3d = {
+_3d = {
     '': [
         'findHomography',
         'calibrateCameraExtended',
@@ -203,6 +201,11 @@ calib3d = {
         'solvePnPRefineLM',
         'projectPoints',
         'undistort',
+    ],
+}
+
+calib = {
+    '': [
 
         # cv::fisheye namespace
         'fisheye_initUndistortRectifyMap',
@@ -210,7 +213,8 @@ calib3d = {
     ],
 }
 
-white_list = makeWhiteList([core, imgproc, objdetect, video, dnn, features2d, photo, calib3d])
+
+white_list = makeWhiteList([core, imgproc, objdetect, video, dnn, features2d, photo, _3d, calib])
 
 # namespace_prefix_override['dnn'] = ''  # compatibility stuff (enabled by default)
 # namespace_prefix_override['aruco'] = ''  # compatibility stuff (enabled by default)
